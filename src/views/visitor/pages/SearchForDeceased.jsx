@@ -2,11 +2,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { NavLink } from "react-router-dom";
 import fetchBurialRecords from "../js/get-burial-records";
-import {
-  buildGraph,
-  buildRoutedPolyline,
-  fmtDistance,
-} from "../js/dijkstra-pathfinding";
+import { buildGraph, buildRoutedPolyline, fmtDistance } from "../js/dijkstra-pathfinding";
 
 import CemeteryMap, {
   CEMETERY_CENTER,
@@ -79,8 +75,7 @@ function cameraErrToMessage(err) {
   if (name === "NotFoundError") return "No camera found on this device.";
   if (name === "NotReadableError")
     return "Camera is already in use by another app (e.g., Messenger/Zoom/Camera). Close it and try again.";
-  if (name === "SecurityError")
-    return "Camera access requires HTTPS (or localhost).";
+  if (name === "SecurityError") return "Camera access requires HTTPS (or localhost).";
   return err?.message || "Unable to access camera.";
 }
 
@@ -131,23 +126,16 @@ function resolvePhotoSrc(photoUrl) {
 }
 
 function getPhotoUrlFromAnything(row, qrData) {
-  return (
-    row?.photo_url ||
-    row?.photoUrl ||
-    qrData?.photo_url ||
-    qrData?.photoUrl ||
-    ""
-  );
+  return row?.photo_url || row?.photoUrl || qrData?.photo_url || qrData?.photoUrl || "";
 }
 
 async function fetchPlotCenterById(plotId) {
   if (!plotId) return null;
 
   try {
-    const res = await fetch(
-      `${API_BASE}/plot/${encodeURIComponent(String(plotId))}`,
-      { headers: { Accept: "application/json" } }
-    );
+    const res = await fetch(`${API_BASE}/plot/${encodeURIComponent(String(plotId))}`, {
+      headers: { Accept: "application/json" },
+    });
     if (!res.ok) return null;
 
     const json = await res.json().catch(() => null);
@@ -184,10 +172,7 @@ function parseLatLngFromToken(token) {
             if (Number.isFinite(+cur.lat) && Number.isFinite(+cur.lng)) {
               return { lat: +cur.lat, lng: +cur.lng, data: obj };
             }
-            if (
-              Number.isFinite(+cur.latitude) &&
-              Number.isFinite(+cur.longitude)
-            ) {
+            if (Number.isFinite(+cur.latitude) && Number.isFinite(+cur.longitude)) {
               return { lat: +cur.latitude, lng: +cur.longitude, data: obj };
             }
             for (const v of Object.values(cur)) {
@@ -218,15 +203,12 @@ function parseLatLngFromToken(token) {
   const mGeo = raw.match(/^geo:([+-]?\d+(?:\.\d+)?),([+-]?\d+(?:\.\d+)?)/i);
   if (mGeo) return { lat: +mGeo[1], lng: +mGeo[2], data: null };
 
-  const mPair = raw.match(
-    /([+-]?\d+(?:\.\d+)?)\s*[,\s]\s*([+-]?\d+(?:\.\d+)?)/i
-  );
+  const mPair = raw.match(/([+-]?\d+(?:\.\d+)?)\s*[,\s]\s*([+-]?\d+(?:\.\d+)?)/i);
   if (mPair) {
     const a = +mPair[1],
       b = +mPair[2];
     const looksLikeLatLng = Math.abs(a) <= 90 && Math.abs(b) <= 180;
-    const looksLikeLngLat =
-      Math.abs(a) <= 180 && Math.abs(b) <= 90 && !looksLikeLatLng;
+    const looksLikeLngLat = Math.abs(a) <= 180 && Math.abs(b) <= 90 && !looksLikeLatLng;
     if (looksLikeLatLng) return { lat: a, lng: b, data: null };
     if (looksLikeLngLat) return { lat: b, lng: a, data: null };
     return { lat: a, lng: b, data: null };
@@ -256,11 +238,7 @@ const formatQrValue = (key, value) => {
 };
 
 const unwrapRows = (payload) =>
-  Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.data)
-    ? payload.data
-    : [];
+  Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
 
 function qrDisplayEntries(data) {
   const omit = new Set([
@@ -418,8 +396,7 @@ function meanCenter(points) {
 }
 
 // --------------------------- Marker icons (SVG data URLs) ---------------------------
-const svgToDataUrl = (svg) =>
-  `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+const svgToDataUrl = (svg) => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 
 const USER_PIN_SVG = `
 <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -452,6 +429,53 @@ const TARGET_PIN_SVG = `
 </svg>
 `;
 
+// --------------------------- Amenities / geofences (static) ---------------------------
+// These are the geofences you gave: 2 comfort rooms + 1 parking lot polygon.
+// Later you can load these from DB via an API (recommended), but this works now.
+
+const COMFORT_ROOMS = [
+  { id: "cr1", title: "Comfort Room 1", position: { lat: 15.495013, lng: 120.554517 } },
+  { id: "cr2", title: "Comfort Room 2", position: { lat: 15.494161, lng: 120.555232 } },
+];
+
+const PARKING_LOT_PATH = [
+  { lat: 15.494962, lng: 120.554452 }, // top left
+  { lat: 15.494451, lng: 120.554879 }, // top right
+  { lat: 15.494264, lng: 120.554623 }, // bottom right
+  { lat: 15.494736, lng: 120.554232 }, // bottom left
+];
+
+const AMENITY_CR_PIN_SVG = `
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="s" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0b1220" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <g filter="url(#s)">
+    <path d="M32 4c-10.5 0-19 8.5-19 19 0 15 19 37 19 37s19-22 19-37C51 12.5 42.5 4 32 4z" fill="#22C55E"/>
+    <rect x="23.5" y="14.5" width="17" height="20" rx="4" fill="#ffffff" opacity="0.95"/>
+    <rect x="28" y="19" width="8" height="10" rx="2" fill="#22C55E" opacity="0.95"/>
+    <circle cx="36.5" cy="18.5" r="1.3" fill="#22C55E" opacity="0.95"/>
+  </g>
+</svg>
+`;
+
+const AMENITY_PARK_PIN_SVG = `
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="s" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0b1220" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <g filter="url(#s)">
+    <path d="M32 4c-10.5 0-19 8.5-19 19 0 15 19 37 19 37s19-22 19-37C51 12.5 42.5 4 32 4z" fill="#F59E0B"/>
+    <circle cx="32" cy="23" r="12" fill="#ffffff" opacity="0.95"/>
+    <text x="32" y="28.5" text-anchor="middle" font-size="14" font-family="Arial" font-weight="700" fill="#F59E0B">P</text>
+  </g>
+</svg>
+`;
+
 // --------------------------- LOAD PLOTS (GeoJSON) for showing all graves ---------------------------
 function normalizeFeatureCollection(body) {
   if (!body) return null;
@@ -467,18 +491,14 @@ function featureToPath(geom) {
   if (geom.type === "Polygon") {
     const ring = geom.coordinates?.[0] || [];
     return ring
-      .map(([lng, lat]) =>
-        Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
-      )
+      .map(([lng, lat]) => (Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null))
       .filter(Boolean);
   }
 
   if (geom.type === "MultiPolygon") {
     const ring = geom.coordinates?.[0]?.[0] || [];
     return ring
-      .map(([lng, lat]) =>
-        Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
-      )
+      .map(([lng, lat]) => (Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null))
       .filter(Boolean);
   }
 
@@ -613,15 +633,11 @@ export default function SearchForDeceased() {
         });
 
         const ct = res.headers.get("content-type") || "";
-        const body = ct.includes("application/json")
-          ? await res.json()
-          : await res.text();
+        const body = ct.includes("application/json") ? await res.json() : await res.text();
 
         if (!res.ok) {
           const msg =
-            typeof body === "string"
-              ? body
-              : body?.message || "Failed to load plots";
+            typeof body === "string" ? body : body?.message || "Failed to load plots";
           throw new Error(msg);
         }
 
@@ -662,9 +678,7 @@ export default function SearchForDeceased() {
 
     if (!("geolocation" in navigator)) {
       setUserLocation(DEFAULT_START);
-      setRouteStatus(
-        "Geolocation not supported. Starting from cemetery entrance."
-      );
+      setRouteStatus("Geolocation not supported. Starting from cemetery entrance.");
       return;
     }
 
@@ -744,8 +758,7 @@ export default function SearchForDeceased() {
 
   useEffect(() => {
     return () => {
-      if (geoWatchIdRef.current)
-        navigator.geolocation.clearWatch(geoWatchIdRef.current);
+      if (geoWatchIdRef.current) navigator.geolocation.clearWatch(geoWatchIdRef.current);
     };
   }, []);
 
@@ -875,9 +888,7 @@ export default function SearchForDeceased() {
       const STRONG = 0.7;
       const WEAK_MIN = 0.4;
 
-      const strong = withScores
-        .filter(({ score }) => score >= STRONG)
-        .map(({ row }) => row);
+      const strong = withScores.filter(({ score }) => score >= STRONG).map(({ row }) => row);
 
       const weak = withScores
         .filter(({ score }) => score >= WEAK_MIN && score < STRONG)
@@ -915,16 +926,12 @@ export default function SearchForDeceased() {
       coords = await fetchPlotCenterById(row.plot_id);
     }
 
-    setScanDataForSelected(
-      parsed?.data && typeof parsed.data === "object" ? parsed.data : null
-    );
+    setScanDataForSelected(parsed?.data && typeof parsed.data === "object" ? parsed.data : null);
 
     setMapCoords(coords);
 
     if (!coords) {
-      setRouteStatus(
-        "Selected record has no location (no lat/lng and plot lookup failed)."
-      );
+      setRouteStatus("Selected record has no location (no lat/lng and plot lookup failed).");
     }
   }
 
@@ -950,9 +957,7 @@ export default function SearchForDeceased() {
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setScanModalOpen(true);
-      setScanErr(
-        "Your browser does not support camera access (getUserMedia missing)."
-      );
+      setScanErr("Your browser does not support camera access (getUserMedia missing).");
       return;
     }
 
@@ -1018,9 +1023,7 @@ export default function SearchForDeceased() {
         }
 
         if (jsQRFn) {
-          const canvas =
-            canvasRef.current ||
-            (canvasRef.current = document.createElement("canvas"));
+          const canvas = canvasRef.current || (canvasRef.current = document.createElement("canvas"));
 
           const vw = vv.videoWidth || 640;
           const vh = vv.videoHeight || 480;
@@ -1035,14 +1038,9 @@ export default function SearchForDeceased() {
           ctx.drawImage(vv, 0, 0, cw, ch);
           const imageData = ctx.getImageData(0, 0, cw, ch);
 
-          const code = jsQRFn(
-            imageData.data,
-            imageData.width,
-            imageData.height,
-            {
-              inversionAttempts: "attemptBoth",
-            }
-          );
+          const code = jsQRFn(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "attemptBoth",
+          });
 
           if (code?.data) {
             await handleQrFound(code.data);
@@ -1156,28 +1154,22 @@ export default function SearchForDeceased() {
         ? parsed.data.plot_id ?? parsed.data.plotId ?? null
         : null;
 
-    let pool = Array.isArray(rows) ? rows : [];
+    let poolLocal = Array.isArray(rows) ? rows : [];
     let matchedRow = null;
 
     if (plotIdFromQr != null) {
-      matchedRow =
-        pool.find((r) => String(r.plot_id) === String(plotIdFromQr)) || null;
+      matchedRow = poolLocal.find((r) => String(r.plot_id) === String(plotIdFromQr)) || null;
 
       if (!matchedRow) {
         try {
-          const morePayload = await fetchBurialRecords({
-            limit: 5000,
-            offset: 0,
-          });
+          const morePayload = await fetchBurialRecords({ limit: 5000, offset: 0 });
           const moreRows = unwrapRows(morePayload);
 
           if (moreRows.length) {
             setRows(moreRows);
-            pool = moreRows;
+            poolLocal = moreRows;
 
-            matchedRow =
-              pool.find((r) => String(r.plot_id) === String(plotIdFromQr)) ||
-              null;
+            matchedRow = poolLocal.find((r) => String(r.plot_id) === String(plotIdFromQr)) || null;
           }
         } catch (e) {
           console.warn("Could not refresh records for QR match:", e);
@@ -1191,9 +1183,7 @@ export default function SearchForDeceased() {
 
     setMapCoords(coords);
 
-    setScanDataForSelected(
-      parsed?.data && typeof parsed.data === "object" ? parsed.data : null
-    );
+    setScanDataForSelected(parsed?.data && typeof parsed.data === "object" ? parsed.data : null);
 
     setScanResult({
       token: text,
@@ -1204,9 +1194,7 @@ export default function SearchForDeceased() {
     });
 
     if (!coords) {
-      setRouteStatus(
-        "QR scanned, but no location found (no lat/lng and plot lookup failed)."
-      );
+      setRouteStatus("QR scanned, but no location found (no lat/lng and plot lookup failed).");
     }
   }
 
@@ -1226,8 +1214,7 @@ export default function SearchForDeceased() {
               </span>
             </CardTitle>
             <CardDescription className="text-slate-600">
-              Born {formatDate(row?.birth_date)} · Died{" "}
-              {formatDate(row?.death_date)}
+              Born {formatDate(row?.birth_date)} · Died {formatDate(row?.death_date)}
             </CardDescription>
           </CardHeader>
           <CardContent className="relative flex items-center justify-end gap-3">
@@ -1243,6 +1230,30 @@ export default function SearchForDeceased() {
   // --------------------------- Map props -------------------
   const mapMarkers = useMemo(() => {
     const list = [];
+
+    // Amenities (always visible)
+    COMFORT_ROOMS.forEach((cr) => {
+      list.push({
+        id: cr.id,
+        position: cr.position,
+        title: cr.title,
+        icon: svgToDataUrl(AMENITY_CR_PIN_SVG),
+        zIndex: 50,
+      });
+    });
+
+    const parkingCenter = meanCenter(PARKING_LOT_PATH);
+    if (parkingCenter) {
+      list.push({
+        id: "parking",
+        position: parkingCenter,
+        title: "Parking Lot",
+        icon: svgToDataUrl(AMENITY_PARK_PIN_SVG),
+        zIndex: 49,
+      });
+    }
+
+    // Dynamic pins (route)
     if (userLocation) {
       list.push({
         id: "user",
@@ -1263,6 +1274,7 @@ export default function SearchForDeceased() {
         zIndex: 1001,
       });
     }
+
     return list;
   }, [userLocation, mapCoords]);
 
@@ -1282,14 +1294,31 @@ export default function SearchForDeceased() {
     ];
   }, [routePath]);
 
+  // Amenities polygons (parking lot)
+  const amenityPolygons = useMemo(() => {
+    if (!PARKING_LOT_PATH?.length) return [];
+    return [
+      {
+        id: "parking_poly",
+        plot_name: "Parking Lot",
+        status: "available",
+        path: PARKING_LOT_PATH,
+        options: {
+          strokeColor: "#F59E0B",
+          fillColor: "#F59E0B",
+          strokeOpacity: 0.9,
+          strokeWeight: 2,
+          fillOpacity: 0.12,
+          zIndex: 2,
+          clickable: false,
+        },
+      },
+    ];
+  }, []);
+
   // ✅ Build polygons from plots FeatureCollection (THIS MAKES GRAVES SHOW)
   const selectedPlotId = useMemo(() => {
-    return (
-      selected?.plot_id ??
-      scanResult?.plot_id ??
-      scanResult?.matchedRow?.plot_id ??
-      null
-    );
+    return selected?.plot_id ?? scanResult?.plot_id ?? scanResult?.matchedRow?.plot_id ?? null;
   }, [selected, scanResult]);
 
   const plotPolygons = useMemo(() => {
@@ -1311,9 +1340,7 @@ export default function SearchForDeceased() {
         else if (statusRaw === "occupied") color = "#ef4444";
 
         const isSelected =
-          selectedPlotId != null &&
-          props.id != null &&
-          String(props.id) === String(selectedPlotId);
+          selectedPlotId != null && props.id != null && String(props.id) === String(selectedPlotId);
 
         const baseOptions = {
           strokeColor: color,
@@ -1372,9 +1399,7 @@ export default function SearchForDeceased() {
 
     try {
       if (!GOOGLE_KEY) {
-        setRouteStatus(
-          "Missing Google Maps API key (VITE_GOOGLE_MAPS_API_KEY)."
-        );
+        setRouteStatus("Missing Google Maps API key (VITE_GOOGLE_MAPS_API_KEY).");
         return;
       }
 
@@ -1399,9 +1424,7 @@ export default function SearchForDeceased() {
         "feature:poi|visibility:off",
         "feature:transit|visibility:off",
       ];
-      const styleParams = styles
-        .map((s) => `&style=${encodeURIComponent(s)}`)
-        .join("");
+      const styleParams = styles.map((s) => `&style=${encodeURIComponent(s)}`).join("");
 
       const url =
         "https://maps.googleapis.com/maps/api/staticmap" +
@@ -1438,18 +1461,9 @@ export default function SearchForDeceased() {
       setRouteStatus("Route image downloaded ✅");
     } catch (e) {
       console.error(e);
-      setRouteStatus(
-        "Image download failed. Please check API key & Static Maps API."
-      );
+      setRouteStatus("Image download failed. Please check API key & Static Maps API.");
     }
-  }, [
-    routeReady,
-    routePath,
-    mapCoords,
-    userLocation,
-    deceasedNameResolved,
-    GOOGLE_KEY,
-  ]);
+  }, [routeReady, routePath, mapCoords, userLocation, deceasedNameResolved, GOOGLE_KEY]);
 
   // UX controls
   const fitCemetery = useCallback(() => {
@@ -1526,9 +1540,7 @@ export default function SearchForDeceased() {
 
                   <div className="w-full rounded-3xl border bg-white/80 px-6 py-5 shadow-sm">
                     <div className="flex items-start gap-3">
-                      <span className="text-3xl sm:text-4xl leading-none text-slate-700">
-                        ❝
-                      </span>
+                      <span className="text-3xl sm:text-4xl leading-none text-slate-700">❝</span>
 
                       <div className="flex-1">
                         <div className="text-lg sm:text-2xl md:text-3xl font-semibold italic text-slate-800 leading-snug">
@@ -1539,17 +1551,14 @@ export default function SearchForDeceased() {
                         </div>
                       </div>
 
-                      <span className="text-3xl sm:text-4xl leading-none text-slate-700">
-                        ❞
-                      </span>
+                      <span className="text-3xl sm:text-4xl leading-none text-slate-700">❞</span>
                     </div>
                   </div>
 
                   <CardDescription className="text-slate-600 max-w-3xl">
                     The map below always shows{" "}
-                    <span className="font-semibold">all graves/plots</span>. Search
-                    by name or scan a QR to pin a specific grave and (optionally)
-                    compute a route.
+                    <span className="font-semibold">all graves/plots</span>. Search by name or scan
+                    a QR to pin a specific grave and (optionally) compute a route.
                   </CardDescription>
                 </div>
 
@@ -1593,10 +1602,7 @@ export default function SearchForDeceased() {
                     className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-4"
                   >
                     <div className="sm:col-span-2 lg:col-span-3">
-                      <label
-                        htmlFor="nameQuery"
-                        className="mb-1 block text-sm text-slate-600"
-                      >
+                      <label htmlFor="nameQuery" className="mb-1 block text-sm text-slate-600">
                         Deceased Name
                       </label>
                       <Input
@@ -1612,11 +1618,7 @@ export default function SearchForDeceased() {
                     </div>
 
                     <div className="sm:col-span-1 lg:col-span-1 flex gap-2 items-end">
-                      <Button
-                        type="submit"
-                        disabled={searching}
-                        className="h-11 rounded-xl"
-                      >
+                      <Button type="submit" disabled={searching} className="h-11 rounded-xl">
                         {searching ? "Searching…" : "Search"}
                       </Button>
                       <Button
@@ -1668,8 +1670,8 @@ export default function SearchForDeceased() {
                     </div>
 
                     <div className="text-xs text-slate-500">
-                      QR should include <code>lat/lng</code> (or <code>latitude/longitude</code>) OR a
-                      valid <code>plot_id</code>.
+                      QR should include <code>lat/lng</code> (or <code>latitude/longitude</code>) OR
+                      a valid <code>plot_id</code>.
                     </div>
                   </div>
                 )}
@@ -1695,64 +1697,61 @@ export default function SearchForDeceased() {
           )}
           {error && (
             <Card className="bg-white/80 backdrop-blur shadow-md border-rose-200 rounded-2xl">
-              <CardContent className="p-6 text-center text-rose-600">
-                {error}
-              </CardContent>
+              <CardContent className="p-6 text-center text-rose-600">{error}</CardContent>
             </Card>
           )}
         </div>
       </section>
 
       {/* Results (only show in Search mode) */}
-      {mode === "name" &&
-        (results.length > 0 || suggestions.length > 0 || notFoundMsg) && (
-          <section className="pb-2">
-            <div className="mx-auto w-full max-w-7xl px-6 lg:px-8 space-y-4">
-              {notFoundMsg && (
-                <Card className="bg-white/80 backdrop-blur shadow-md border-amber-200 rounded-2xl">
-                  <CardContent className="p-6 text-center text-slate-700">
-                    <div className="text-lg">No match found</div>
-                    <div className="mt-1 text-sm text-slate-600">{notFoundMsg}</div>
-                  </CardContent>
-                </Card>
-              )}
+      {mode === "name" && (results.length > 0 || suggestions.length > 0 || notFoundMsg) && (
+        <section className="pb-2">
+          <div className="mx-auto w-full max-w-7xl px-6 lg:px-8 space-y-4">
+            {notFoundMsg && (
+              <Card className="bg-white/80 backdrop-blur shadow-md border-amber-200 rounded-2xl">
+                <CardContent className="p-6 text-center text-slate-700">
+                  <div className="text-lg">No match found</div>
+                  <div className="mt-1 text-sm text-slate-600">{notFoundMsg}</div>
+                </CardContent>
+              </Card>
+            )}
 
-              {results.length > 0 && (
-                <div className="space-y-2">
-                  <div className="text-sm font-medium text-slate-700">
-                    Best matches ({results.length})
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {results.map((r) => (
-                      <RecordCard
-                        key={`res-${r.id ?? `${r.plot_id}-${getSearchName(r)}`}`}
-                        row={r}
-                        onPick={handleSelect}
-                      />
-                    ))}
-                  </div>
+            {results.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-sm font-medium text-slate-700">
+                  Best matches ({results.length})
                 </div>
-              )}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {results.map((r) => (
+                    <RecordCard
+                      key={`res-${r.id ?? `${r.plot_id}-${getSearchName(r)}`}`}
+                      row={r}
+                      onPick={handleSelect}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
-              {suggestions.length > 0 && (
-                <div className="space-y-2">
-                  <div className="text-sm font-medium text-slate-700">
-                    Other possible matches ({suggestions.length})
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {suggestions.map((r) => (
-                      <RecordCard
-                        key={`sug-${r.id ?? `${r.plot_id}-${getSearchName(r)}`}`}
-                        row={r}
-                        onPick={handleSelect}
-                      />
-                    ))}
-                  </div>
+            {suggestions.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-sm font-medium text-slate-700">
+                  Other possible matches ({suggestions.length})
                 </div>
-              )}
-            </div>
-          </section>
-        )}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {suggestions.map((r) => (
+                    <RecordCard
+                      key={`sug-${r.id ?? `${r.plot_id}-${getSearchName(r)}`}`}
+                      row={r}
+                      onPick={handleSelect}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ALWAYS SHOW MAP + details panel */}
       <section className="pb-10">
@@ -1768,15 +1767,15 @@ export default function SearchForDeceased() {
                   <span className="rounded-full border bg-white/80 px-2.5 py-1 text-[11px] text-slate-700">
                     All graves shown
                   </span>
+                  <span className="rounded-full border bg-white/80 px-2.5 py-1 text-[11px] text-slate-700">
+                    Amenities shown (CR + Parking)
+                  </span>
                 </CardTitle>
 
                 <CardDescription className="flex flex-wrap items-center gap-2">
                   {routeDistance > 0 && (
                     <span className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs text-slate-700 shadow-sm">
-                      Distance:{" "}
-                      <span className="font-semibold">
-                        {fmtDistance(routeDistance)}
-                      </span>
+                      Distance: <span className="font-semibold">{fmtDistance(routeDistance)}</span>
                     </span>
                   )}
                 </CardDescription>
@@ -1846,8 +1845,8 @@ export default function SearchForDeceased() {
                     showGeofence={false}
                     // ✅ hide yellow road overlay
                     showInitialRoads={false}
-                    // ✅ IMPORTANT: THIS IS WHAT MAKES GRAVES SHOW
-                    polygons={plotPolygons}
+                    // ✅ graves + amenities polygons
+                    polygons={[...amenityPolygons, ...plotPolygons]}
                     center={mapCoords || CEMETERY_CENTER}
                     zoom={mapCoords ? 19 : 17}
                     markers={mapMarkers}
@@ -1861,9 +1860,10 @@ export default function SearchForDeceased() {
                   <div className="rounded-2xl border bg-white/90 p-4 shadow-sm">
                     <div className="font-semibold text-slate-800">Tip</div>
                     <div className="text-sm text-slate-600 mt-1">
-                      The map already shows{" "}
-                      <span className="font-semibold">all graves</span>. Use Search
-                      or QR to pin a grave and generate directions.
+                      The map already shows <span className="font-semibold">all graves</span> plus{" "}
+                      <span className="font-semibold">comfort rooms</span> and{" "}
+                      <span className="font-semibold">parking</span>. Use Search or QR to pin a
+                      grave and generate directions.
                     </div>
                   </div>
                 )}
@@ -1872,9 +1872,8 @@ export default function SearchForDeceased() {
                   <div className="rounded-2xl border bg-white/90 p-4 shadow-sm">
                     <div className="font-semibold text-slate-800">How to get there</div>
                     <div className="text-sm text-slate-600 mt-1">
-                      Your location uses the{" "}
-                      <span className="font-semibold">blue pin</span> and the grave uses the{" "}
-                      <span className="font-semibold">pink target pin</span>.
+                      Your location uses the <span className="font-semibold">blue pin</span> and
+                      the grave uses the <span className="font-semibold">pink target pin</span>.
                     </div>
 
                     {routeSteps?.length ? (
@@ -1899,8 +1898,7 @@ export default function SearchForDeceased() {
                 <CardDescription className="text-slate-600">
                   {hasDetailsOpen ? (
                     <>
-                      Deceased:{" "}
-                      <span className="font-semibold">{deceasedNameResolved}</span>
+                      Deceased: <span className="font-semibold">{deceasedNameResolved}</span>
                       {scanResult?.matchedRow?.plot_id && (
                         <span className="ml-2 text-emerald-700 text-xs font-medium">
                           (matched by plot_id)
@@ -1926,9 +1924,7 @@ export default function SearchForDeceased() {
                     />
                   </div>
                 ) : hasDetailsOpen ? (
-                  <div className="text-xs text-slate-500">
-                    No photo uploaded for this record.
-                  </div>
+                  <div className="text-xs text-slate-500">No photo uploaded for this record.</div>
                 ) : (
                   <div className="rounded-2xl border bg-white/80 p-4 text-sm text-slate-600">
                     Search a name or scan a QR to pin a grave and show info here.
@@ -1948,17 +1944,13 @@ export default function SearchForDeceased() {
                       <div>
                         <div className="text-slate-500">Birth Date</div>
                         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-800 shadow-sm">
-                          {formatDate(
-                            (selected || scanResult?.matchedRow)?.birth_date
-                          )}
+                          {formatDate((selected || scanResult?.matchedRow)?.birth_date)}
                         </div>
                       </div>
                       <div>
                         <div className="text-slate-500">Death Date</div>
                         <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-800 shadow-sm">
-                          {formatDate(
-                            (selected || scanResult?.matchedRow)?.death_date
-                          )}
+                          {formatDate((selected || scanResult?.matchedRow)?.death_date)}
                         </div>
                       </div>
                     </div>
@@ -1975,11 +1967,7 @@ export default function SearchForDeceased() {
                     {(() => {
                       const entries = qrDisplayEntries(scanDataForSelected);
                       if (entries.length === 0)
-                        return (
-                          <div className="text-sm text-slate-500">
-                            No displayable fields.
-                          </div>
-                        );
+                        return <div className="text-sm text-slate-500">No displayable fields.</div>;
                       return entries.map(({ key, label, value }) => (
                         <div key={key} className="text-sm">
                           <div className="text-slate-500">{label}</div>
@@ -2012,11 +2000,7 @@ export default function SearchForDeceased() {
                 New Search
               </Button>
 
-              <Button
-                variant="outline"
-                className="rounded-xl"
-                onClick={() => switchMode("qr")}
-              >
+              <Button variant="outline" className="rounded-xl" onClick={() => switchMode("qr")}>
                 Scan Another QR
               </Button>
             </div>
@@ -2025,10 +2009,7 @@ export default function SearchForDeceased() {
       </section>
 
       {/* Scan Modal */}
-      <Dialog
-        open={scanModalOpen}
-        onOpenChange={(o) => (o ? setScanModalOpen(true) : closeScanModal())}
-      >
+      <Dialog open={scanModalOpen} onOpenChange={(o) => (o ? setScanModalOpen(true) : closeScanModal())}>
         <DialogContent
           className="sm:max-w-2xl rounded-2xl"
           onInteractOutside={(e) => e.preventDefault()}
@@ -2079,9 +2060,7 @@ export default function SearchForDeceased() {
           {scanMode === "upload" && (
             <div className="text-sm text-slate-600">
               Processing image…{" "}
-              {scanErr && (
-                <span className="text-rose-600 font-medium ml-2">{scanErr}</span>
-              )}
+              {scanErr && <span className="text-rose-600 font-medium ml-2">{scanErr}</span>}
             </div>
           )}
 
@@ -2111,8 +2090,8 @@ export default function SearchForDeceased() {
           <DialogHeader>
             <DialogTitle>Use Your Location?</DialogTitle>
             <DialogDescription>
-              If you allow location access, we’ll start the route from where you are.
-              If you decline, we’ll start from the cemetery entrance.
+              If you allow location access, we’ll start the route from where you are. If you
+              decline, we’ll start from the cemetery entrance.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">

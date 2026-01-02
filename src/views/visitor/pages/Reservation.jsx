@@ -446,13 +446,7 @@ export default function Reservation() {
     return h;
   }, [token]);
 
-  const burialDateInFuture = useMemo(() => {
-  return isFutureYMD(deceased.date_of_burial, todayISO);
-}, [deceased.date_of_burial, todayISO]);
-
-const burialBeforeDeath = useMemo(() => {
-  return isBeforeYMD(deceased.date_of_burial, deceased.date_of_death);
-}, [deceased.date_of_burial, deceased.date_of_death]);
+const todayISO = useMemo(() => todayISODateLocal(), []);
 
 
   /* =====================================================================================
@@ -504,7 +498,13 @@ const burialBeforeDeath = useMemo(() => {
   const [loadingPlots, setLoadingPlots] = useState(false);
   const [plotsError, setPlotsError] = useState("");
 
-  const todayISO = useMemo(() => todayISODateLocal(), []);
+ const burialDateInFuture = useMemo(() => {
+   return isFutureYMD(deceased.date_of_burial, todayISO);
+ }, [deceased.date_of_burial, todayISO]);
+
+ const burialBeforeDeath = useMemo(() => {
+   return isBeforeYMD(deceased.date_of_burial, deceased.date_of_death);
+ }, [deceased.date_of_burial, deceased.date_of_death]);
 
   const deathDateInFuture = useMemo(() => {
     const dod = deceased.date_of_death || "";
