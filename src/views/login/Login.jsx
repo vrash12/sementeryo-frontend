@@ -1,9 +1,11 @@
-//frontend/src/views/login/Login.jsx
-import { useEffect, useMemo, useState } from "react";
+// frontend/src/views/login/Login.jsx
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { postLogin } from "./js/login";
 import { postSignup } from "./js/signup";
 import emailjs from "@emailjs/browser";
+
+import { ENV } from "../../config/env";
 
 // shadcn/ui
 import { Button } from "../../components/ui/button";
@@ -27,9 +29,9 @@ import {
 import { Alert, AlertDescription } from "../../components/ui/alert";
 
 // --- env
-const SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID;
-const TEMPLATE_ID = import.meta.env.VITE_EMAILJS_TEMPLATE_ID;
-const PUBLIC_KEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
+const SERVICE_ID = ENV.EMAILJS_SERVICE_ID;
+const TEMPLATE_ID = ENV.EMAILJS_TEMPLATE_ID;
+const PUBLIC_KEY = ENV.EMAILJS_PUBLIC_KEY;
 
 export default function Login() {
   const nav = useNavigate();
@@ -62,10 +64,8 @@ export default function Login() {
   const canResend = msLeft <= 0;
 
   useEffect(() => {
-    if (PUBLIC_KEY) {
-      // init once – EmailJS v4+ allows send without init if passing publicKey; this keeps it explicit.
-      emailjs.init(PUBLIC_KEY);
-    }
+    // Only init EmailJS if key exists
+    if (PUBLIC_KEY) emailjs.init(PUBLIC_KEY);
   }, []);
 
   const onChange = (e) => {
@@ -99,6 +99,15 @@ export default function Login() {
   }
 
   async function sendOtpEmail(toEmail) {
+    if (!PUBLIC_KEY || !SERVICE_ID || !TEMPLATE_ID) {
+      setMsg({
+        type: "error",
+        text:
+          "Email verification is not configured (missing EmailJS env vars). Please contact the administrator.",
+      });
+      return;
+    }
+
     const code = generateOtp();
     const expires = Date.now() + 15 * 60 * 1000; // 15 minutes
 
@@ -157,7 +166,6 @@ export default function Login() {
         });
         nav(next);
       } else {
-        // signup path
         if (
           !formData.username ||
           !formData.email ||
@@ -173,7 +181,6 @@ export default function Login() {
           return;
         }
 
-        // Step 1: send OTP to email using EmailJS template
         await sendOtpEmail(formData.email.trim());
       }
     } catch (err) {
@@ -197,7 +204,6 @@ export default function Login() {
       return;
     }
 
-    // Code is valid → proceed to create account
     try {
       setLoading(true);
       const { token, next } = await postSignup({
@@ -241,7 +247,6 @@ export default function Login() {
 
   return (
     <div className="relative min-h-screen flex items-center justify-center font-poppins px-4">
-      {/* global backdrop */}
       <div aria-hidden className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-gradient-to-br from-emerald-100 via-cyan-50 to-blue-100" />
         <div className="absolute -top-24 -left-24 h-[32rem] w-[32rem] rounded-full bg-emerald-300/50 blur-3xl dark:bg-emerald-500/10" />
@@ -250,189 +255,189 @@ export default function Login() {
       </div>
 
       <div className="relative w-full max-w-md">
-        {/* backdrop shadow */}
         <div className="absolute -inset-2 bg-gradient-to-br from-emerald-400/25 via-cyan-400/20 to-blue-400/25 rounded-3xl blur-xl opacity-40" />
 
         <Card className="relative overflow-hidden w-full rounded-3xl border-white/60 dark:border-white/10 bg-white/80 dark:bg-white/5 backdrop-blur supports-[backdrop-filter]:bg-white/40 shadow-2xl">
-          {/* backdrop gradient */}
           <div className="absolute inset-0 bg-gradient-to-br from-emerald-400/20 via-cyan-400/15 to-blue-400/20" />
-        <CardHeader className="relative space-y-1">
-          <CardTitle className="text-2xl text-slate-900">
-            {isLogin ? "Sign In" : "Create Account"}
-          </CardTitle>
-          <CardDescription className="text-slate-600">
-            {isLogin
-              ? "Enter your credentials to access your account"
-              : "Fill in your details to get started"}
-          </CardDescription>
-        </CardHeader>
 
-        <CardContent className="relative">
-          {msg.text ? (
-            <Alert
-              className={`mb-4 backdrop-blur shadow-md ${
-                msg.type === "error" ? "bg-rose-50/90 border-rose-200" : "bg-emerald-50/90 border-emerald-200"
-              }`}
-            >
-              <AlertDescription
-                className={msg.type === "error" ? "text-rose-700" : "text-emerald-700"}
+          <CardHeader className="relative space-y-1">
+            <CardTitle className="text-2xl text-slate-900">
+              {isLogin ? "Sign In" : "Create Account"}
+            </CardTitle>
+            <CardDescription className="text-slate-600">
+              {isLogin
+                ? "Enter your credentials to access your account"
+                : "Fill in your details to get started"}
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="relative">
+            {msg.text ? (
+              <Alert
+                className={`mb-4 backdrop-blur shadow-md ${
+                  msg.type === "error"
+                    ? "bg-rose-50/90 border-rose-200"
+                    : "bg-emerald-50/90 border-emerald-200"
+                }`}
               >
-                {msg.text}
-              </AlertDescription>
-            </Alert>
-          ) : null}
+                <AlertDescription
+                  className={msg.type === "error" ? "text-rose-700" : "text-emerald-700"}
+                >
+                  {msg.text}
+                </AlertDescription>
+              </Alert>
+            ) : null}
 
-          <form className="space-y-4" onSubmit={handleSubmit}>
-            {!isLogin && (
-              <>
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              {!isLogin && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="username">Username</Label>
+                    <Input
+                      id="username"
+                      type="text"
+                      name="username"
+                      value={formData.username}
+                      onChange={onChange}
+                      placeholder="johndoe"
+                      autoComplete="username"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="first_name">First Name</Label>
+                      <Input
+                        id="first_name"
+                        type="text"
+                        name="first_name"
+                        value={formData.first_name}
+                        onChange={onChange}
+                        placeholder="John"
+                        autoComplete="given-name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="last_name">Last Name</Label>
+                      <Input
+                        id="last_name"
+                        type="text"
+                        name="last_name"
+                        value={formData.last_name}
+                        onChange={onChange}
+                        placeholder="Doe"
+                        autoComplete="family-name"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor={isLogin ? "usernameOrEmail" : "email"}>
+                  {isLogin ? "Email or Username" : "Email Address"}
+                </Label>
+                <Input
+                  id={isLogin ? "usernameOrEmail" : "email"}
+                  type={isLogin ? "text" : "email"}
+                  name={isLogin ? "usernameOrEmail" : "email"}
+                  value={isLogin ? formData.usernameOrEmail : formData.email}
+                  onChange={onChange}
+                  placeholder={isLogin ? "you@example.com or johndoe" : "you@example.com"}
+                  autoComplete="email"
+                />
+              </div>
+
+              {!isLogin && (
                 <div className="space-y-2">
-                  <Label htmlFor="username">Username</Label>
+                  <Label htmlFor="phone">Phone Number</Label>
                   <Input
-                    id="username"
-                    type="text"
-                    name="username"
-                    value={formData.username}
+                    id="phone"
+                    type="tel"
+                    name="phone"
+                    value={formData.phone}
                     onChange={onChange}
-                    placeholder="johndoe"
-                    autoComplete="username"
+                    placeholder="+63 912 345 6789"
+                    autoComplete="tel"
                   />
                 </div>
+              )}
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label htmlFor="first_name">First Name</Label>
-                    <Input
-                      id="first_name"
-                      type="text"
-                      name="first_name"
-                      value={formData.first_name}
-                      onChange={onChange}
-                      placeholder="John"
-                      autoComplete="given-name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="last_name">Last Name</Label>
-                    <Input
-                      id="last_name"
-                      type="text"
-                      name="last_name"
-                      value={formData.last_name}
-                      onChange={onChange}
-                      placeholder="Doe"
-                      autoComplete="family-name"
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-
-            <div className="space-y-2">
-              <Label htmlFor={isLogin ? "usernameOrEmail" : "email"}>
-                {isLogin ? "Email or Username" : "Email Address"}
-              </Label>
-              <Input
-                id={isLogin ? "usernameOrEmail" : "email"}
-                type={isLogin ? "text" : "email"}
-                name={isLogin ? "usernameOrEmail" : "email"}
-                value={isLogin ? formData.usernameOrEmail : formData.email}
-                onChange={onChange}
-                placeholder={isLogin ? "you@example.com or johndoe" : "you@example.com"}
-                autoComplete="email"
-              />
-            </div>
-
-            {!isLogin && (
               <div className="space-y-2">
-                <Label htmlFor="phone">Phone Number</Label>
+                <Label htmlFor="password">Password</Label>
                 <Input
-                  id="phone"
-                  type="tel"
-                  name="phone"
-                  value={formData.phone}
-                  onChange={onChange}
-                  placeholder="+63 912 345 6789"
-                  autoComplete="tel"
-                />
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                name="password"
-                value={formData.password}
-                onChange={onChange}
-                placeholder="••••••••"
-                autoComplete={isLogin ? "current-password" : "new-password"}
-              />
-            </div>
-
-            {!isLogin && (
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Confirm Password</Label>
-                <Input
-                  id="confirmPassword"
+                  id="password"
                   type="password"
-                  name="confirmPassword"
-                  value={formData.confirmPassword}
+                  name="password"
+                  value={formData.password}
                   onChange={onChange}
                   placeholder="••••••••"
-                  autoComplete="new-password"
+                  autoComplete={isLogin ? "current-password" : "new-password"}
                 />
               </div>
-            )}
 
-            {isLogin && (
-              <div className="flex justify-end">
-                <Button
-                  type="button"
-                  variant="link"
-                  className="px-0 text-emerald-600"
-                  onClick={() =>
-                    setMsg({
-                      type: "ok",
-                      text: "Please contact the administrator to reset your password.",
-                    })
-                  }
-                >
-                  Forgot your password?
-                </Button>
-              </div>
-            )}
+              {!isLogin && (
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirm Password</Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    name="confirmPassword"
+                    value={formData.confirmPassword}
+                    onChange={onChange}
+                    placeholder="••••••••"
+                    autoComplete="new-password"
+                  />
+                </div>
+              )}
 
-            <Button
-              type="submit"
-              disabled={loading || sendingOtp}
-              className="w-full shadow-md hover:shadow-lg transition-all"
-            >
-              {loading || sendingOtp
-                ? isLogin
-                  ? "Signing in…"
-                  : sendingOtp
-                  ? "Sending code…"
-                  : "Creating…"
-                : isLogin
-                ? "Sign In"
-                : "Create Account"}
-            </Button>
-          </form>
+              {isLogin && (
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="px-0 text-emerald-600"
+                    onClick={() =>
+                      setMsg({
+                        type: "ok",
+                        text: "Please contact the administrator to reset your password.",
+                      })
+                    }
+                  >
+                    Forgot your password?
+                  </Button>
+                </div>
+              )}
 
-          <div className="mt-6 text-center text-sm">
-            <span className="text-slate-600">
-              {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
-            </span>
-            <Button variant="link" onClick={toggleForm} className="p-0">
-              {isLogin ? "Sign up here!" : "Sign in here!"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+              <Button
+                type="submit"
+                disabled={loading || sendingOtp}
+                className="w-full shadow-md hover:shadow-lg transition-all"
+              >
+                {loading || sendingOtp
+                  ? isLogin
+                    ? "Signing in…"
+                    : sendingOtp
+                    ? "Sending code…"
+                    : "Creating…"
+                  : isLogin
+                  ? "Sign In"
+                  : "Create Account"}
+              </Button>
+            </form>
+
+            <div className="mt-6 text-center text-sm">
+              <span className="text-slate-600">
+                {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
+              </span>
+              <Button variant="link" onClick={toggleForm} className="p-0">
+                {isLogin ? "Sign up here!" : "Sign in here!"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* OTP Dialog */}
       <Dialog open={otpDialogOpen} onOpenChange={setOtpDialogOpen}>
         <DialogContent className="sm:max-w-md bg-white/90 backdrop-blur border-white/60 shadow-2xl">
           <DialogHeader>
@@ -465,12 +470,17 @@ export default function Login() {
               type="button"
               variant="secondary"
               onClick={resendOtp}
-              disabled={sendingOtp || (!canResend && !PUBLIC_KEY)}
+              disabled={sendingOtp}
               className="shadow-md hover:shadow-lg transition-all"
             >
               {sendingOtp ? "Sending…" : "Resend Code"}
             </Button>
-            <Button type="button" onClick={verifyAndCreate} disabled={loading} className="shadow-md hover:shadow-lg transition-all">
+            <Button
+              type="button"
+              onClick={verifyAndCreate}
+              disabled={loading}
+              className="shadow-md hover:shadow-lg transition-all"
+            >
               Verify & Create Account
             </Button>
           </DialogFooter>
