@@ -1,7 +1,0 @@
-**/node_modules
-**/dist
-**/.vite
-**/.cache
-.git
-.gitignore
-README.md

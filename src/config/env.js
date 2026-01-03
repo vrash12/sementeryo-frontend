@@ -1,9 +1,12 @@
 // frontend/src/config/env.js
 
+console.log("[ENV BUILD CHECK]", import.meta.env.VITE_API_BASE_URL);
 function clean(v) {
   if (v == null) return "";
   return String(v).trim();
 }
+
+
 
 // Safe defaults so deployment won't crash if Render build didn't inject env vars.
 // (You can still override these via Render Environment Variables.)
