@@ -2,12 +2,17 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { NavLink } from "react-router-dom";
 import fetchBurialRecords from "../js/get-burial-records";
-import { buildGraph, buildRoutedPolyline, fmtDistance } from "../js/dijkstra-pathfinding";
+import {
+  buildGraph,
+  buildRoutedPolyline,
+  fmtDistance,
+} from "../js/dijkstra-pathfinding";
 
 import CemeteryMap, {
   CEMETERY_CENTER,
   CEMETERY_ENTRANCE,
   INITIAL_ROAD_SEGMENTS,
+  isInsideGeofence, // ✅ geofence gating
 } from "../../../components/map/CemeteryMap";
 
 // shadcn/ui
@@ -65,7 +70,9 @@ function safeFileName(s) {
 // --------------------------- Device API helpers ---------------------------
 function isSecureForDeviceAPIs() {
   const host = window.location.hostname;
-  return window.isSecureContext || host === "localhost" || host === "127.0.0.1";
+  return (
+    window.isSecureContext || host === "localhost" || host === "127.0.0.1"
+  );
 }
 
 function cameraErrToMessage(err) {
@@ -80,7 +87,7 @@ function cameraErrToMessage(err) {
 }
 
 // --------------------------- plot center fallback ---------------------------
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api"; // ✅ fallback to avoid env crash
 const API_ORIGIN = String(API_BASE || "").replace(/\/api\/?$/, "");
 
 function centerOfGeometry(geom) {
@@ -126,16 +133,23 @@ function resolvePhotoSrc(photoUrl) {
 }
 
 function getPhotoUrlFromAnything(row, qrData) {
-  return row?.photo_url || row?.photoUrl || qrData?.photo_url || qrData?.photoUrl || "";
+  return (
+    row?.photo_url ||
+    row?.photoUrl ||
+    qrData?.photo_url ||
+    qrData?.photoUrl ||
+    ""
+  );
 }
 
 async function fetchPlotCenterById(plotId) {
   if (!plotId) return null;
 
   try {
-    const res = await fetch(`${API_BASE}/plot/${encodeURIComponent(String(plotId))}`, {
-      headers: { Accept: "application/json" },
-    });
+    const res = await fetch(
+      `${API_BASE}/plot/${encodeURIComponent(String(plotId))}`,
+      { headers: { Accept: "application/json" } }
+    );
     if (!res.ok) return null;
 
     const json = await res.json().catch(() => null);
@@ -172,7 +186,10 @@ function parseLatLngFromToken(token) {
             if (Number.isFinite(+cur.lat) && Number.isFinite(+cur.lng)) {
               return { lat: +cur.lat, lng: +cur.lng, data: obj };
             }
-            if (Number.isFinite(+cur.latitude) && Number.isFinite(+cur.longitude)) {
+            if (
+              Number.isFinite(+cur.latitude) &&
+              Number.isFinite(+cur.longitude)
+            ) {
               return { lat: +cur.latitude, lng: +cur.longitude, data: obj };
             }
             for (const v of Object.values(cur)) {
@@ -200,15 +217,20 @@ function parseLatLngFromToken(token) {
   const jsonAttempt = tryJson(raw);
   if (jsonAttempt) return jsonAttempt;
 
-  const mGeo = raw.match(/^geo:([+-]?\d+(?:\.\d+)?),([+-]?\d+(?:\.\d+)?)/i);
+  const mGeo = raw.match(
+    /^geo:([+-]?\d+(?:\.\d+)?),([+-]?\d+(?:\.\d+)?)/i
+  );
   if (mGeo) return { lat: +mGeo[1], lng: +mGeo[2], data: null };
 
-  const mPair = raw.match(/([+-]?\d+(?:\.\d+)?)\s*[,\s]\s*([+-]?\d+(?:\.\d+)?)/i);
+  const mPair = raw.match(
+    /([+-]?\d+(?:\.\d+)?)\s*[,\s]\s*([+-]?\d+(?:\.\d+)?)/i
+  );
   if (mPair) {
     const a = +mPair[1],
       b = +mPair[2];
     const looksLikeLatLng = Math.abs(a) <= 90 && Math.abs(b) <= 180;
-    const looksLikeLngLat = Math.abs(a) <= 180 && Math.abs(b) <= 90 && !looksLikeLatLng;
+    const looksLikeLngLat =
+      Math.abs(a) <= 180 && Math.abs(b) <= 90 && !looksLikeLatLng;
     if (looksLikeLatLng) return { lat: a, lng: b, data: null };
     if (looksLikeLngLat) return { lat: b, lng: a, data: null };
     return { lat: a, lng: b, data: null };
@@ -238,7 +260,11 @@ const formatQrValue = (key, value) => {
 };
 
 const unwrapRows = (payload) =>
-  Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+  Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.data)
+    ? payload.data
+    : [];
 
 function qrDisplayEntries(data) {
   const omit = new Set([
@@ -395,8 +421,49 @@ function meanCenter(points) {
   return { lat: sLat / points.length, lng: sLng / points.length };
 }
 
+// --------------------------- Nearest CR helpers ---------------------------
+function haversineDistanceM(a, b) {
+  if (!a || !b) return Infinity;
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLng = Math.sin(dLng / 2);
+
+  const h =
+    sinDLat * sinDLat +
+    Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
+
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function getNearestComfortRoom(userLoc, comfortRooms) {
+  if (!userLoc || !Array.isArray(comfortRooms) || !comfortRooms.length)
+    return null;
+
+  let best = null;
+  let bestD = Infinity;
+
+  for (const cr of comfortRooms) {
+    const d = haversineDistanceM(userLoc, cr.position);
+    if (d < bestD) {
+      bestD = d;
+      best = cr;
+    }
+  }
+
+  return best ? { room: best, distanceM: bestD } : null;
+}
+
 // --------------------------- Marker icons (SVG data URLs) ---------------------------
-const svgToDataUrl = (svg) => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+const svgToDataUrl = (svg) =>
+  `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 
 const USER_PIN_SVG = `
 <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -429,10 +496,7 @@ const TARGET_PIN_SVG = `
 </svg>
 `;
 
-// --------------------------- Amenities / geofences (static) ---------------------------
-// These are the geofences you gave: 2 comfort rooms + 1 parking lot polygon.
-// Later you can load these from DB via an API (recommended), but this works now.
-
+// --------------------------- Amenities (static) ---------------------------
 const COMFORT_ROOMS = [
   { id: "cr1", title: "Comfort Room 1", position: { lat: 15.495013, lng: 120.554517 } },
   { id: "cr2", title: "Comfort Room 2", position: { lat: 15.494161, lng: 120.555232 } },
@@ -457,6 +521,22 @@ const AMENITY_CR_PIN_SVG = `
     <rect x="23.5" y="14.5" width="17" height="20" rx="4" fill="#ffffff" opacity="0.95"/>
     <rect x="28" y="19" width="8" height="10" rx="2" fill="#22C55E" opacity="0.95"/>
     <circle cx="36.5" cy="18.5" r="1.3" fill="#22C55E" opacity="0.95"/>
+  </g>
+</svg>
+`;
+
+const AMENITY_CR_NEAREST_PIN_SVG = `
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="s" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0b1220" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <g filter="url(#s)">
+    <path d="M32 4c-10.5 0-19 8.5-19 19 0 15 19 37 19 37s19-22 19-37C51 12.5 42.5 4 32 4z" fill="#16A34A"/>
+    <rect x="23.5" y="14.5" width="17" height="20" rx="4" fill="#ffffff" opacity="0.95"/>
+    <path d="M32 16l1.6 3.2 3.5.5-2.5 2.4.6 3.5L32 23.9l-3.2 1.7.6-3.5-2.5-2.4 3.5-.5L32 16z"
+      fill="#16A34A" opacity="0.95"/>
   </g>
 </svg>
 `;
@@ -491,14 +571,18 @@ function featureToPath(geom) {
   if (geom.type === "Polygon") {
     const ring = geom.coordinates?.[0] || [];
     return ring
-      .map(([lng, lat]) => (Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null))
+      .map(([lng, lat]) =>
+        Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
+      )
       .filter(Boolean);
   }
 
   if (geom.type === "MultiPolygon") {
     const ring = geom.coordinates?.[0]?.[0] || [];
     return ring
-      .map(([lng, lat]) => (Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null))
+      .map(([lng, lat]) =>
+        Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
+      )
       .filter(Boolean);
   }
 
@@ -535,6 +619,10 @@ export default function SearchForDeceased() {
   const [locationConsent, setLocationConsent] = useState(false);
   const [locationModalOpen, setLocationModalOpen] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
+
+  // ✅ track where userLocation came from
+  // "gps" = real location inside geofence, "entrance" = fallback, "none" = not set yet
+  const [locationSource, setLocationSource] = useState("none");
 
   const [graph, setGraph] = useState(null);
 
@@ -633,11 +721,15 @@ export default function SearchForDeceased() {
         });
 
         const ct = res.headers.get("content-type") || "";
-        const body = ct.includes("application/json") ? await res.json() : await res.text();
+        const body = ct.includes("application/json")
+          ? await res.json()
+          : await res.text();
 
         if (!res.ok) {
           const msg =
-            typeof body === "string" ? body : body?.message || "Failed to load plots";
+            typeof body === "string"
+              ? body
+              : body?.message || "Failed to load plots";
           throw new Error(msg);
         }
 
@@ -672,93 +764,128 @@ export default function SearchForDeceased() {
     setLocationModalOpen(false);
 
     hasGoodLocationRef.current = false;
-
     setUserLocation(null);
+    setLocationSource("none");
     setRouteStatus("Requesting your location…");
 
     if (!("geolocation" in navigator)) {
       setUserLocation(DEFAULT_START);
+      setLocationSource("entrance");
       setRouteStatus("Geolocation not supported. Starting from cemetery entrance.");
       return;
     }
 
     if (!isSecureForDeviceAPIs()) {
       setUserLocation(DEFAULT_START);
+      setLocationSource("entrance");
       setRouteStatus(
         "Location blocked by browser (needs HTTPS or localhost). Starting from cemetery entrance."
       );
       return;
     }
 
-    const onSuccess = (position) => {
-      const { latitude, longitude, accuracy } = position.coords;
-      hasGoodLocationRef.current = true;
-      const loc = { lat: latitude, lng: longitude };
-      setUserLocation(loc);
-      setRouteStatus(`Location acquired ✅ (±${Math.round(accuracy || 0)}m)`);
-    };
+    // clear old watch if any
+    if (geoWatchIdRef.current) {
+      navigator.geolocation.clearWatch(geoWatchIdRef.current);
+      geoWatchIdRef.current = null;
+    }
 
-    const onError = (err) => {
-      console.warn("Geolocation error:", err);
-
-      const code = err?.code;
-      const msg =
-        code === 1
-          ? "Location permission denied."
-          : code === 2
-          ? "Location unavailable. Turn on GPS / Location Services and try again."
-          : code === 3
-          ? "Location timed out. Try again (better signal) or use the entrance."
-          : "Could not get your location.";
-
-      if (!hasGoodLocationRef.current) {
-        setUserLocation(DEFAULT_START);
-        setRouteStatus(`${msg} Starting from cemetery entrance.`);
-      } else {
-        setRouteStatus("Location updates stopped. Using last known location.");
-      }
-    };
-
-    try {
-      navigator.geolocation.getCurrentPosition(onSuccess, onError, {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0,
-      });
-
-      if (geoWatchIdRef.current) {
-        navigator.geolocation.clearWatch(geoWatchIdRef.current);
-      }
-
+    const startWatch = () => {
       geoWatchIdRef.current = navigator.geolocation.watchPosition(
-        onSuccess,
+        (position) => {
+          const { latitude, longitude, accuracy } = position.coords;
+          const loc = { lat: latitude, lng: longitude };
+
+          // ✅ Live updates only while inside geofence
+          const inside = isInsideGeofence(loc.lat, loc.lng);
+          if (!inside) {
+            if (geoWatchIdRef.current) {
+              navigator.geolocation.clearWatch(geoWatchIdRef.current);
+              geoWatchIdRef.current = null;
+            }
+            setRouteStatus(
+              "You left the cemetery boundary. Live GPS updates stopped. Using last known location."
+            );
+            return;
+          }
+
+          hasGoodLocationRef.current = true;
+          setUserLocation(loc);
+          setLocationSource("gps");
+          setRouteStatus(`Live location ✅ (±${Math.round(accuracy || 0)}m)`);
+        },
         (err) => {
           console.warn("watchPosition error:", err);
-          if (!hasGoodLocationRef.current) onError(err);
+          if (!hasGoodLocationRef.current) {
+            setUserLocation(DEFAULT_START);
+            setLocationSource("entrance");
+            setRouteStatus("Location updates failed. Starting from cemetery entrance.");
+          } else {
+            setRouteStatus("Location updates stopped. Using last known location.");
+          }
         },
-        {
-          enableHighAccuracy: true,
-          timeout: 20000,
-          maximumAge: 0,
-        }
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
       );
-    } catch (e) {
-      console.warn("Geolocation threw:", e);
-      setUserLocation(DEFAULT_START);
-      setRouteStatus("Location failed. Starting from cemetery entrance.");
-    }
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        const loc = { lat: latitude, lng: longitude };
+
+        // ✅ First check: inside cemetery?
+        const inside = isInsideGeofence(loc.lat, loc.lng);
+
+        if (!inside) {
+          setUserLocation(DEFAULT_START);
+          setLocationSource("entrance");
+          setRouteStatus(
+            "You are outside the cemetery boundary. Live GPS is only available inside. Starting from cemetery entrance."
+          );
+          return; // ✅ do NOT start watchPosition
+        }
+
+        hasGoodLocationRef.current = true;
+        setUserLocation(loc);
+        setLocationSource("gps");
+        setRouteStatus(`Location acquired ✅ (±${Math.round(accuracy || 0)}m)`);
+
+        // ✅ only start live updates when inside
+        startWatch();
+      },
+      (err) => {
+        console.warn("Geolocation error:", err);
+
+        const code = err?.code;
+        const msg =
+          code === 1
+            ? "Location permission denied."
+            : code === 2
+            ? "Location unavailable. Turn on GPS / Location Services and try again."
+            : code === 3
+            ? "Location timed out. Try again (better signal) or use the entrance."
+            : "Could not get your location.";
+
+        setUserLocation(DEFAULT_START);
+        setLocationSource("entrance");
+        setRouteStatus(`${msg} Starting from cemetery entrance.`);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
   }, [DEFAULT_START]);
 
   const useDefaultLocation = useCallback(() => {
     setLocationConsent(true);
     setLocationModalOpen(false);
     setUserLocation(DEFAULT_START);
+    setLocationSource("entrance");
     if (!routeStatus) setRouteStatus("Starting route from cemetery entrance.");
   }, [DEFAULT_START, routeStatus]);
 
   useEffect(() => {
     return () => {
-      if (geoWatchIdRef.current) navigator.geolocation.clearWatch(geoWatchIdRef.current);
+      if (geoWatchIdRef.current)
+        navigator.geolocation.clearWatch(geoWatchIdRef.current);
     };
   }, []);
 
@@ -888,7 +1015,9 @@ export default function SearchForDeceased() {
       const STRONG = 0.7;
       const WEAK_MIN = 0.4;
 
-      const strong = withScores.filter(({ score }) => score >= STRONG).map(({ row }) => row);
+      const strong = withScores
+        .filter(({ score }) => score >= STRONG)
+        .map(({ row }) => row);
 
       const weak = withScores
         .filter(({ score }) => score >= WEAK_MIN && score < STRONG)
@@ -926,12 +1055,16 @@ export default function SearchForDeceased() {
       coords = await fetchPlotCenterById(row.plot_id);
     }
 
-    setScanDataForSelected(parsed?.data && typeof parsed.data === "object" ? parsed.data : null);
+    setScanDataForSelected(
+      parsed?.data && typeof parsed.data === "object" ? parsed.data : null
+    );
 
     setMapCoords(coords);
 
     if (!coords) {
-      setRouteStatus("Selected record has no location (no lat/lng and plot lookup failed).");
+      setRouteStatus(
+        "Selected record has no location (no lat/lng and plot lookup failed)."
+      );
     }
   }
 
@@ -957,7 +1090,9 @@ export default function SearchForDeceased() {
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setScanModalOpen(true);
-      setScanErr("Your browser does not support camera access (getUserMedia missing).");
+      setScanErr(
+        "Your browser does not support camera access (getUserMedia missing)."
+      );
       return;
     }
 
@@ -1023,7 +1158,9 @@ export default function SearchForDeceased() {
         }
 
         if (jsQRFn) {
-          const canvas = canvasRef.current || (canvasRef.current = document.createElement("canvas"));
+          const canvas =
+            canvasRef.current ||
+            (canvasRef.current = document.createElement("canvas"));
 
           const vw = vv.videoWidth || 640;
           const vh = vv.videoHeight || 480;
@@ -1087,7 +1224,8 @@ export default function SearchForDeceased() {
 
       if ("BarcodeDetector" in window) {
         try {
-          const supported = await window.BarcodeDetector.getSupportedFormats?.();
+          const supported =
+            await window.BarcodeDetector.getSupportedFormats?.();
           if (!supported || supported.includes("qr_code")) {
             const det = new window.BarcodeDetector({ formats: ["qr_code"] });
             const codes = await det.detect(canvas);
@@ -1158,7 +1296,9 @@ export default function SearchForDeceased() {
     let matchedRow = null;
 
     if (plotIdFromQr != null) {
-      matchedRow = poolLocal.find((r) => String(r.plot_id) === String(plotIdFromQr)) || null;
+      matchedRow =
+        poolLocal.find((r) => String(r.plot_id) === String(plotIdFromQr)) ||
+        null;
 
       if (!matchedRow) {
         try {
@@ -1169,7 +1309,9 @@ export default function SearchForDeceased() {
             setRows(moreRows);
             poolLocal = moreRows;
 
-            matchedRow = poolLocal.find((r) => String(r.plot_id) === String(plotIdFromQr)) || null;
+            matchedRow =
+              poolLocal.find((r) => String(r.plot_id) === String(plotIdFromQr)) ||
+              null;
           }
         } catch (e) {
           console.warn("Could not refresh records for QR match:", e);
@@ -1183,7 +1325,9 @@ export default function SearchForDeceased() {
 
     setMapCoords(coords);
 
-    setScanDataForSelected(parsed?.data && typeof parsed.data === "object" ? parsed.data : null);
+    setScanDataForSelected(
+      parsed?.data && typeof parsed.data === "object" ? parsed.data : null
+    );
 
     setScanResult({
       token: text,
@@ -1194,7 +1338,9 @@ export default function SearchForDeceased() {
     });
 
     if (!coords) {
-      setRouteStatus("QR scanned, but no location found (no lat/lng and plot lookup failed).");
+      setRouteStatus(
+        "QR scanned, but no location found (no lat/lng and plot lookup failed)."
+      );
     }
   }
 
@@ -1227,18 +1373,34 @@ export default function SearchForDeceased() {
     );
   }
 
+  // --------------------------- Nearest CR (GPS + inside geofence only) -------------------
+  const nearestCR = useMemo(() => {
+    if (locationSource !== "gps") return null;
+    if (!userLocation) return null;
+
+    const inside = isInsideGeofence(userLocation.lat, userLocation.lng);
+    if (!inside) return null;
+
+    return getNearestComfortRoom(userLocation, COMFORT_ROOMS);
+  }, [userLocation, locationSource]);
+
   // --------------------------- Map props -------------------
   const mapMarkers = useMemo(() => {
     const list = [];
 
+    const nearestId = nearestCR?.room?.id || null;
+
     // Amenities (always visible)
     COMFORT_ROOMS.forEach((cr) => {
+      const isNearest = nearestId && cr.id === nearestId;
+
       list.push({
         id: cr.id,
         position: cr.position,
-        title: cr.title,
-        icon: svgToDataUrl(AMENITY_CR_PIN_SVG),
-        zIndex: 50,
+        title: isNearest ? `${cr.title} (Nearest)` : cr.title,
+        icon: svgToDataUrl(isNearest ? AMENITY_CR_NEAREST_PIN_SVG : AMENITY_CR_PIN_SVG),
+        label: isNearest ? "Nearest CR" : undefined,
+        zIndex: isNearest ? 80 : 50,
       });
     });
 
@@ -1276,7 +1438,7 @@ export default function SearchForDeceased() {
     }
 
     return list;
-  }, [userLocation, mapCoords]);
+  }, [userLocation, mapCoords, nearestCR]);
 
   const mapPolylines = useMemo(() => {
     if (!routePath?.length) return [];
@@ -1318,7 +1480,12 @@ export default function SearchForDeceased() {
 
   // ✅ Build polygons from plots FeatureCollection (THIS MAKES GRAVES SHOW)
   const selectedPlotId = useMemo(() => {
-    return selected?.plot_id ?? scanResult?.plot_id ?? scanResult?.matchedRow?.plot_id ?? null;
+    return (
+      selected?.plot_id ??
+      scanResult?.plot_id ??
+      scanResult?.matchedRow?.plot_id ??
+      null
+    );
   }, [selected, scanResult]);
 
   const plotPolygons = useMemo(() => {
@@ -1332,7 +1499,11 @@ export default function SearchForDeceased() {
         if (path.length < 3) return null;
 
         const id =
-          props.id != null ? String(props.id) : props.uid ? String(props.uid) : undefined;
+          props.id != null
+            ? String(props.id)
+            : props.uid
+            ? String(props.uid)
+            : undefined;
 
         const statusRaw = String(props.status || "").trim().toLowerCase();
         let color = "#10b981"; // available
@@ -1340,7 +1511,9 @@ export default function SearchForDeceased() {
         else if (statusRaw === "occupied") color = "#ef4444";
 
         const isSelected =
-          selectedPlotId != null && props.id != null && String(props.id) === String(selectedPlotId);
+          selectedPlotId != null &&
+          props.id != null &&
+          String(props.id) === String(selectedPlotId);
 
         const baseOptions = {
           strokeColor: color,
@@ -1399,7 +1572,9 @@ export default function SearchForDeceased() {
 
     try {
       if (!GOOGLE_KEY) {
-        setRouteStatus("Missing Google Maps API key (VITE_GOOGLE_MAPS_API_KEY).");
+        setRouteStatus(
+          "Missing Google Maps API key (VITE_GOOGLE_MAPS_API_KEY)."
+        );
         return;
       }
 
@@ -1424,7 +1599,9 @@ export default function SearchForDeceased() {
         "feature:poi|visibility:off",
         "feature:transit|visibility:off",
       ];
-      const styleParams = styles.map((s) => `&style=${encodeURIComponent(s)}`).join("");
+      const styleParams = styles
+        .map((s) => `&style=${encodeURIComponent(s)}`)
+        .join("");
 
       const url =
         "https://maps.googleapis.com/maps/api/staticmap" +
@@ -1778,6 +1955,13 @@ export default function SearchForDeceased() {
                       Distance: <span className="font-semibold">{fmtDistance(routeDistance)}</span>
                     </span>
                   )}
+
+                  {nearestCR?.room && (
+                    <span className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs text-slate-700 shadow-sm">
+                      Nearest CR: <span className="font-semibold">{nearestCR.room.title}</span>
+                      <span className="text-slate-500">({Math.round(nearestCR.distanceM)}m)</span>
+                    </span>
+                  )}
                 </CardDescription>
               </CardHeader>
 
@@ -1874,6 +2058,15 @@ export default function SearchForDeceased() {
                     <div className="text-sm text-slate-600 mt-1">
                       Your location uses the <span className="font-semibold">blue pin</span> and
                       the grave uses the <span className="font-semibold">pink target pin</span>.
+                      {locationSource === "gps" ? (
+                        <span className="ml-2 text-emerald-700 text-xs font-medium">
+                          (Live GPS inside cemetery)
+                        </span>
+                      ) : (
+                        <span className="ml-2 text-slate-500 text-xs font-medium">
+                          (Starting from entrance)
+                        </span>
+                      )}
                     </div>
 
                     {routeSteps?.length ? (
@@ -2009,7 +2202,10 @@ export default function SearchForDeceased() {
       </section>
 
       {/* Scan Modal */}
-      <Dialog open={scanModalOpen} onOpenChange={(o) => (o ? setScanModalOpen(true) : closeScanModal())}>
+      <Dialog
+        open={scanModalOpen}
+        onOpenChange={(o) => (o ? setScanModalOpen(true) : closeScanModal())}
+      >
         <DialogContent
           className="sm:max-w-2xl rounded-2xl"
           onInteractOutside={(e) => e.preventDefault()}
@@ -2090,8 +2286,9 @@ export default function SearchForDeceased() {
           <DialogHeader>
             <DialogTitle>Use Your Location?</DialogTitle>
             <DialogDescription>
-              If you allow location access, we’ll start the route from where you are. If you
-              decline, we’ll start from the cemetery entrance.
+              If you allow location access, we’ll start the route from where you are.
+              If you are outside the cemetery boundary, live GPS will be disabled and we’ll start
+              from the cemetery entrance.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
