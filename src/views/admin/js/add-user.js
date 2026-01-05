@@ -1,60 +1,26 @@
-// Simple API helper for creating a user (admin)
-// Usage: const res = await addUser(payload);
+import { getAuth } from "../../../utils/auth";
 
-const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) ||
-  "";
-
-function getAuth() {
-  try {
-    const raw = localStorage.getItem("auth");
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-function decodeJwtPayload(token) {
-  try {
-    const [, payload] = token.split(".");
-    const decoded = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
-    return JSON.parse(decoded);
-  } catch {
-    return null;
-  }
-}
+const API_BASE = String(import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/+$/, "");
 
 export async function addUser(payload) {
-  const auth = getAuth();
-  if (!auth?.token) {
-    return { ok: false, error: "Not authenticated." };
-  }
-  
-  let actorId = null;
-  const jwt = decodeJwtPayload(auth.token);
-  actorId =
-    jwt?.id ?? jwt?.user_id ?? jwt?.sub ?? auth?.user?.id ?? auth?.user?.user_id ?? null;
-
-  const body = {
-    ...payload,
-    created_by: actorId,
-  };
-
   try {
-    const res = await fetch(`${API_BASE}/superadmin/add-user`, {
+    const auth = getAuth() || {};
+    const token = auth?.token;
+
+    const res = await fetch(`${API_BASE}/admin/visitors`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${auth.token}`,
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload || {}),
     });
 
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return { ok: false, error: data?.message || `HTTP ${res.status}` };
-    }
-    return { ok: true, data };
-  } catch (err) {
-    return { ok: false, error: err?.message || "Network error" };
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return { ok: false, error: data?.error || "Failed to add visitor." };
+    return { ok: true, data: data?.data ?? data };
+  } catch (e) {
+    return { ok: false, error: e?.message || "Network error." };
   }
 }
