@@ -316,6 +316,17 @@ export default function BurialRecords() {
         </div>
       </div>
 
+      {/* ✅ Panel note for capstone suggestion */}
+      <Alert className="border-slate-200 bg-slate-50">
+        <Info className="h-4 w-4" />
+        <AlertTitle>Capstone panel note (Burial Record / Scheduling module)</AlertTitle>
+        <AlertDescription className="text-slate-700">
+          Also, for the burial record or schedule module, it says that when a visitor fills up the
+          information, the admin should just select the details that the visitor submitted for the
+          deceased’s information.
+        </AlertDescription>
+      </Alert>
+
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col lg:flex-row gap-4 lg:items-end lg:justify-between">
@@ -347,10 +358,7 @@ export default function BurialRecords() {
 
               <div className="min-w-[160px]">
                 <Label className="text-xs text-slate-500">Rows per page</Label>
-                <Select
-                  value={String(pageSize)}
-                  onValueChange={(v) => setPageSize(Number(v))}
-                >
+                <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="Rows" />
                   </SelectTrigger>
@@ -373,12 +381,7 @@ export default function BurialRecords() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setPage(1)}
-                disabled={page <= 1}
-              >
+              <Button size="sm" variant="outline" onClick={() => setPage(1)} disabled={page <= 1}>
                 First
               </Button>
               <Button
@@ -443,7 +446,7 @@ export default function BurialRecords() {
                     <TableHead>Plot</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead>Full Name</TableHead> {/* ✅ requested */}
+                    <TableHead>Full Name</TableHead>
                     <TableHead className="text-right">Size (sqm)</TableHead>
                     <TableHead className="text-right">Price</TableHead>
                     <TableHead className="text-right">Action</TableHead>
@@ -493,9 +496,7 @@ export default function BurialRecords() {
                           ) : null}
                         </TableCell>
 
-                        <TableCell className="text-right text-sm">
-                          {r?.size_sqm ?? "—"}
-                        </TableCell>
+                        <TableCell className="text-right text-sm">{r?.size_sqm ?? "—"}</TableCell>
 
                         <TableCell className="text-right text-sm">{money(r?.price)}</TableCell>
 
