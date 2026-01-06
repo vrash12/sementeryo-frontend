@@ -19,7 +19,6 @@ import {
   Bell,
   CheckCircle2,
   XCircle as RejectIcon,
-  CreditCard,
 
   // ✅ Burial icons
   Skull,
@@ -171,27 +170,12 @@ function reservationBadgeProps(statusRaw) {
     return { label: "Rejected", className: "bg-rose-600 hover:bg-rose-600" };
   if (s === "cancelled" || s === "canceled")
     return { label: "Cancelled", className: "bg-slate-500 hover:bg-slate-500" };
-  return { label: statusRaw || "—", className: "bg-slate-500 hover:bg-slate-500" };
+  return {
+    label: statusRaw || "—",
+    className: "bg-slate-500 hover:bg-slate-500",
+  };
 }
 
-function paymentBadgeProps(paymentStatusRaw) {
-  const s = String(paymentStatusRaw || "").trim().toLowerCase();
-  if (!s || s === "unpaid")
-    return { label: "Unpaid", className: "bg-slate-500 hover:bg-slate-500" };
-  if (s === "submitted")
-    return { label: "Submitted", className: "bg-amber-500 hover:bg-amber-500" };
-  if (s === "validated")
-    return { label: "Validated", className: "bg-blue-600 hover:bg-blue-600" };
-  if (s === "approved")
-    return { label: "Approved", className: "bg-emerald-600 hover:bg-emerald-600" };
-  if (s === "rejected")
-    return { label: "Rejected", className: "bg-rose-600 hover:bg-rose-600" };
-  return { label: paymentStatusRaw || "—", className: "bg-slate-500 hover:bg-slate-500" };
-}
-
-function paymentIsAccepted(paymentStatusRaw) {
-  return String(paymentStatusRaw || "").trim().toLowerCase() === "approved";
-}
 function reservationIsDone(statusRaw) {
   const s = String(statusRaw || "").trim().toLowerCase();
   return s !== "pending";
@@ -234,11 +218,17 @@ function parseNum(v) {
 function getLatLngFromRow(row) {
   if (!row) return null;
   const lat =
-    row.lat != null ? parseNum(row.lat) :
-    row.latitude != null ? parseNum(row.latitude) : null;
+    row.lat != null
+      ? parseNum(row.lat)
+      : row.latitude != null
+        ? parseNum(row.latitude)
+        : null;
   const lng =
-    row.lng != null ? parseNum(row.lng) :
-    row.longitude != null ? parseNum(row.longitude) : null;
+    row.lng != null
+      ? parseNum(row.lng)
+      : row.longitude != null
+        ? parseNum(row.longitude)
+        : null;
 
   if (lat == null || lng == null) return null;
   return { lat, lng };
@@ -330,24 +320,6 @@ function reservationPlotKeyCandidates(r) {
     .filter((v) => v !== null && v !== undefined && String(v).trim() !== "")
     .map((v) => String(v));
 }
-function getReceiptUrlFromReservation(r) {
-  return String(
-    r?.payment_receipt_url ??
-      r?.receipt_url ??
-      r?.receiptUrl ??
-      r?.payment_receipt ??
-      r?.paymentReceipt ??
-      r?.paymentReceiptUrl ??
-      r?.proof_url ??
-      r?.proofUrl ??
-      r?.proof ??
-      r?.payment_proof ??
-      r?.payment_proof_url ??
-      r?.gcash_receipt_url ??
-      r?.gcashReceiptUrl ??
-      ""
-  ).trim();
-}
 
 /* ---------------- Reservations Panel ---------------- */
 const ReservationsPanel = memo(function ReservationsPanel({
@@ -357,25 +329,29 @@ const ReservationsPanel = memo(function ReservationsPanel({
   error,
   onRefresh,
   onCancel,
-  onValidatePayment,
-  onApprovePayment,
+  onApprove,
   onReject,
   focusReservationId,
 }) {
-
   const runAction = async (fn, id, fallbackMsg) => {
-  try {
-    await fn?.(id);
-  } catch (e) {
-    toast.error(String(e?.message || fallbackMsg || "Action failed"));
-  }
-};
+    try {
+      await fn?.(id);
+    } catch (e) {
+      toast.error(String(e?.message || fallbackMsg || "Action failed"));
+    }
+  };
 
   const summary = useMemo(() => {
     const list = reservations || [];
-    const pending = list.filter((r) => String(r?.status || "").trim().toLowerCase() === "pending").length;
-    const approved = list.filter((r) => String(r?.status || "").trim().toLowerCase() === "approved").length;
-    const rejected = list.filter((r) => String(r?.status || "").trim().toLowerCase() === "rejected").length;
+    const pending = list.filter(
+      (r) => String(r?.status || "").trim().toLowerCase() === "pending"
+    ).length;
+    const approved = list.filter(
+      (r) => String(r?.status || "").trim().toLowerCase() === "approved"
+    ).length;
+    const rejected = list.filter(
+      (r) => String(r?.status || "").trim().toLowerCase() === "rejected"
+    ).length;
     const cancelled = list.filter((r) => {
       const s = String(r?.status || "").trim().toLowerCase();
       return s === "cancelled" || s === "canceled";
@@ -386,9 +362,7 @@ const ReservationsPanel = memo(function ReservationsPanel({
       return s === "pending" || s === "approved";
     }).length;
 
-    const paid = list.filter((r) => paymentIsAccepted(r?.payment_status)).length;
-
-    return { pending, approved, rejected, cancelled, active, paid };
+    return { pending, approved, rejected, cancelled, active };
   }, [reservations]);
 
   return (
@@ -407,33 +381,53 @@ const ReservationsPanel = memo(function ReservationsPanel({
             onClick={() => onRefresh?.()}
             disabled={loading}
           >
-            <RefreshCcw className={["mr-2 h-4 w-4", loading ? "animate-spin" : ""].join(" ")} />
+            <RefreshCcw
+              className={[
+                "mr-2 h-4 w-4",
+                loading ? "animate-spin" : "",
+              ].join(" ")}
+            />
             Refresh
           </Button>
         </CardTitle>
 
         <CardDescription>
-          Reservations linked to: <span className="font-medium">{plotLabel || "—"}</span>
+          Reservations linked to:{" "}
+          <span className="font-medium">{plotLabel || "—"}</span>
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-3">
         <div className="flex flex-wrap gap-2">
-          <Badge className={summary.pending ? "bg-amber-500 hover:bg-amber-500" : "bg-slate-500 hover:bg-slate-500"}>
+          <Badge
+            className={
+              summary.pending
+                ? "bg-amber-500 hover:bg-amber-500"
+                : "bg-slate-500 hover:bg-slate-500"
+            }
+          >
             Pending: {summary.pending}
           </Badge>
-          <Badge className={summary.approved ? "bg-emerald-600 hover:bg-emerald-600" : "bg-slate-500 hover:bg-slate-500"}>
+          <Badge
+            className={
+              summary.approved
+                ? "bg-emerald-600 hover:bg-emerald-600"
+                : "bg-slate-500 hover:bg-slate-500"
+            }
+          >
             Approved: {summary.approved}
           </Badge>
-          <Badge className={summary.rejected ? "bg-rose-600 hover:bg-rose-600" : "bg-slate-500 hover:bg-slate-500"}>
+          <Badge
+            className={
+              summary.rejected
+                ? "bg-rose-600 hover:bg-rose-600"
+                : "bg-slate-500 hover:bg-slate-500"
+            }
+          >
             Rejected: {summary.rejected}
           </Badge>
-          <Badge className="bg-slate-500 hover:bg-slate-500">Cancelled: {summary.cancelled}</Badge>
-          <Badge
-            className={summary.paid ? "bg-emerald-600 hover:bg-emerald-600" : "bg-slate-500 hover:bg-slate-500"}
-            title="Payment accepted (payment_status=approved)"
-          >
-            Payment Accepted: {summary.paid}
+          <Badge className="bg-slate-500 hover:bg-slate-500">
+            Cancelled: {summary.cancelled}
           </Badge>
         </div>
 
@@ -444,8 +438,8 @@ const ReservationsPanel = memo(function ReservationsPanel({
               This plot already has an active reservation
             </AlertTitle>
             <AlertDescription className="text-amber-800">
-              There {summary.active === 1 ? "is" : "are"} {summary.active} active reservation
-              {summary.active === 1 ? "" : "s"} (pending/approved).
+              There {summary.active === 1 ? "is" : "are"} {summary.active} active
+              reservation{summary.active === 1 ? "" : "s"} (pending or approved).
             </AlertDescription>
           </Alert>
         ) : null}
@@ -466,7 +460,9 @@ const ReservationsPanel = memo(function ReservationsPanel({
             Loading reservations…
           </div>
         ) : !reservations?.length ? (
-          <div className="text-sm text-slate-600">No reservations found for this plot.</div>
+          <div className="text-sm text-slate-600">
+            No reservations found for this plot.
+          </div>
         ) : (
           <div className="rounded-md border overflow-hidden">
             <Table>
@@ -475,8 +471,6 @@ const ReservationsPanel = memo(function ReservationsPanel({
                   <TableHead>ID</TableHead>
                   <TableHead>Reserved For</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Payment</TableHead>
-                  <TableHead>Accepted?</TableHead>
                   <TableHead>Done?</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Notes</TableHead>
@@ -487,9 +481,13 @@ const ReservationsPanel = memo(function ReservationsPanel({
               <TableBody>
                 {reservations.map((r) => {
                   const b = reservationBadgeProps(r.status);
-                  const created = r.created_at ? String(r.created_at).slice(0, 10) : "—";
+                  const created = r.created_at
+                    ? String(r.created_at).slice(0, 10)
+                    : "—";
 
-                  const statusLower = String(r.status || "").trim().toLowerCase();
+                  const statusLower = String(r.status || "")
+                    .trim()
+                    .toLowerCase();
 
                   const canCancel =
                     statusLower !== "cancelled" &&
@@ -497,77 +495,33 @@ const ReservationsPanel = memo(function ReservationsPanel({
                     statusLower !== "rejected";
 
                   const isFocused =
-                    focusReservationId != null && String(r.id) === String(focusReservationId);
+                    focusReservationId != null &&
+                    String(r.id) === String(focusReservationId);
 
                   const done = reservationIsDone(r.status);
 
-                  const payBadge = paymentBadgeProps(r.payment_status);
-                  const accepted = paymentIsAccepted(r.payment_status);
+                  const canApprove = statusLower === "pending";
 
-                  const paymentLower = String(r.payment_status || "").trim().toLowerCase();
-
-                  // ✅ FIX: support multiple possible receipt fields
-                  const receiptUrl = getReceiptUrlFromReservation(r);
-                  const hasReceipt = Boolean(receiptUrl);
-
-                  // ✅ Validate allowed if pending + payment is submitted/unpaid/empty/pending
-                  const canValidate =
-                    statusLower === "pending" &&
-                    (paymentLower === "submitted" ||
-                      paymentLower === "unpaid" ||
-                      paymentLower === "" ||
-                      paymentLower === "pending");
-
-          const canApprovePay =
-  statusLower === "pending" &&
-  (paymentLower === "validated" || paymentLower === "submitted");
                   return (
                     <TableRow
                       key={r.id ?? `${created}-${Math.random()}`}
                       className={isFocused ? "bg-amber-50" : ""}
                     >
-                      <TableCell className="font-medium">{r.id ?? "—"}</TableCell>
+                      <TableCell className="font-medium">
+                        {r.id ?? "—"}
+                      </TableCell>
 
                       <TableCell>
                         <div className="text-sm">
                           {r.reserved_for_name ?? "—"}
-                          <div className="text-xs text-slate-500">{r.reserved_for_email ?? ""}</div>
+                          <div className="text-xs text-slate-500">
+                            {r.reserved_for_email ?? ""}
+                          </div>
                         </div>
                       </TableCell>
 
                       <TableCell>
                         <Badge className={b.className}>{b.label}</Badge>
-                      </TableCell>
-
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Badge className={payBadge.className}>{payBadge.label}</Badge>
-                          {hasReceipt ? (
-                            <a
-                              href={receiptUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-xs text-blue-600 underline"
-                              title="Open uploaded receipt"
-                            >
-                              receipt
-                            </a>
-                          ) : null}
-                        </div>
-                      </TableCell>
-
-                      <TableCell>
-                        {accepted ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-700 text-sm">
-                            <CheckCircle2 className="h-4 w-4" />
-                            Yes
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-slate-600 text-sm">
-                            <XCircle className="h-4 w-4" />
-                            No
-                          </span>
-                        )}
                       </TableCell>
 
                       <TableCell>
@@ -586,44 +540,39 @@ const ReservationsPanel = memo(function ReservationsPanel({
 
                       <TableCell>{created}</TableCell>
 
-                      <TableCell className="max-w-[220px] truncate" title={r.notes ?? ""}>
+                      <TableCell
+                        className="max-w-[220px] truncate"
+                        title={r.notes ?? ""}
+                      >
                         {r.notes ?? "—"}
                       </TableCell>
 
                       <TableCell className="text-right">
                         {statusLower === "pending" ? (
                           <div className="flex justify-end gap-2 flex-wrap">
-                   <Button
-  type="button"
-  size="sm"
-  disabled={!canApprovePay}
-  onClick={() => runAction(onApprovePayment, r.id, "Approve failed")}
->
-  <CheckCircle2 className="mr-2 h-4 w-4" />
-  Approve
-</Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={!canApprove}
+                              onClick={() =>
+                                runAction(onApprove, r.id, "Approve failed")
+                              }
+                            >
+                              <CheckCircle2 className="mr-2 h-4 w-4" />
+                              Approve
+                            </Button>
 
-<Button
-  type="button"
-  size="sm"
-  variant="outline"
-  disabled={!canValidate || !hasReceipt}
-  onClick={() => runAction(onValidatePayment, r.id, "Validate failed")}
->
-  <CreditCard className="mr-2 h-4 w-4" />
-  Validate
-</Button>
-
-<Button
-  type="button"
-  size="sm"
-  variant="destructive"
-  onClick={() => runAction(onReject, r.id, "Reject failed")}
->
-  <RejectIcon className="mr-2 h-4 w-4" />
-  Reject
-</Button>
-
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="destructive"
+                              onClick={() =>
+                                runAction(onReject, r.id, "Reject failed")
+                              }
+                            >
+                              <RejectIcon className="mr-2 h-4 w-4" />
+                              Reject
+                            </Button>
                           </div>
                         ) : (
                           <Button
@@ -633,7 +582,10 @@ const ReservationsPanel = memo(function ReservationsPanel({
                             disabled={!canCancel}
                             onClick={async () => {
                               if (!canCancel) return;
-                              if (!window.confirm("Cancel this reservation?")) return;
+                              if (
+                                !window.confirm("Cancel this reservation?")
+                              )
+                                return;
                               await onCancel?.(r.id);
                             }}
                           >
@@ -1260,8 +1212,6 @@ const ReservationRequestsCard = memo(function ReservationRequestsCard({
                   <TableHead>ID</TableHead>
                   <TableHead>Plot</TableHead>
                   <TableHead>Reserved For</TableHead>
-                  <TableHead>Payment</TableHead>
-                  <TableHead>Accepted?</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Notes</TableHead>
                   <TableHead className="text-right">Action</TableHead>
@@ -1280,9 +1230,6 @@ const ReservationRequestsCard = memo(function ReservationRequestsCard({
                     r.plotUid ??
                     "—";
 
-                  const payBadge = paymentBadgeProps(r.payment_status);
-                  const accepted = paymentIsAccepted(r.payment_status);
-
                   return (
                     <TableRow key={r.id ?? `${created}-${Math.random()}`}>
                       <TableCell className="font-medium">{r.id ?? "—"}</TableCell>
@@ -1292,24 +1239,6 @@ const ReservationRequestsCard = memo(function ReservationRequestsCard({
                           {r.reserved_for_name ?? "—"}
                           <div className="text-xs text-slate-500">{r.reserved_for_email ?? ""}</div>
                         </div>
-                      </TableCell>
-
-                      <TableCell>
-                        <Badge className={payBadge.className}>{payBadge.label}</Badge>
-                      </TableCell>
-
-                      <TableCell>
-                        {accepted ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-700 text-sm">
-                            <CheckCircle2 className="h-4 w-4" />
-                            Yes
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-slate-600 text-sm">
-                            <XCircle className="h-4 w-4" />
-                            No
-                          </span>
-                        )}
                       </TableCell>
 
                       <TableCell>{created}</TableCell>
@@ -1406,8 +1335,9 @@ export default function BurialPlots() {
     () => ({
       reservations: `${API_BASE}/admin/reservations`,
       cancelReservation: (id) => `${API_BASE}/admin/cancel-reservation/${encodeURIComponent(id)}`,
-      validatePayment: (id) => `${API_BASE}/admin/reservations/${encodeURIComponent(id)}/validate-payment`,
-      approvePayment: (id) => `${API_BASE}/admin/reservations/${encodeURIComponent(id)}/approve-payment`,
+
+      // NOTE: keeping your existing endpoint name on the backend, but the UI no longer shows payment/receipt
+      approveReservation: (id) => `${API_BASE}/admin/reservations/${encodeURIComponent(id)}/approve-payment`,
       rejectReservation: (id) => `${API_BASE}/admin/reservations/${encodeURIComponent(id)}/reject`,
 
       // ✅ Burial records (matches your admin.routes.js: GET/POST/PATCH at /burial-records)
@@ -1529,9 +1459,9 @@ export default function BurialPlots() {
     [ADMIN_ENDPOINTS, authHeader]
   );
 
-  const validatePaymentAdmin = useCallback(
+  const approveReservationAdmin = useCallback(
     async (reservationId) => {
-      const url = ADMIN_ENDPOINTS.validatePayment(reservationId);
+      const url = ADMIN_ENDPOINTS.approveReservation(reservationId);
       const res = await fetch(url, { method: "PATCH", headers: { ...authHeader, Accept: "application/json" } });
       const ct = res.headers.get("content-type") || "";
       const body = ct.includes("application/json") ? await res.json() : await res.text();
@@ -1539,23 +1469,7 @@ export default function BurialPlots() {
         const msg = typeof body === "string" ? body : body?.message || JSON.stringify(body);
         throw new Error(msg || `Failed: ${res.status}`);
       }
-      toast.success("Payment validated.");
-      return body;
-    },
-    [ADMIN_ENDPOINTS, authHeader]
-  );
-
-  const approvePaymentAdmin = useCallback(
-    async (reservationId) => {
-      const url = ADMIN_ENDPOINTS.approvePayment(reservationId);
-      const res = await fetch(url, { method: "PATCH", headers: { ...authHeader, Accept: "application/json" } });
-      const ct = res.headers.get("content-type") || "";
-      const body = ct.includes("application/json") ? await res.json() : await res.text();
-      if (!res.ok) {
-        const msg = typeof body === "string" ? body : body?.message || JSON.stringify(body);
-        throw new Error(msg || `Failed: ${res.status}`);
-      }
-      toast.success("Payment approved (accepted).");
+      toast.success("Reservation approved.");
       return body;
     },
     [ADMIN_ENDPOINTS, authHeader]
@@ -2214,7 +2128,7 @@ export default function BurialPlots() {
       }
 
       if (!key) {
-        toast.error("This request has no plot reference (plot_id/plot_uid).");
+        toast.error("This request has no plot reference (plot_id or plot_uid).");
         return;
       }
 
@@ -2353,8 +2267,8 @@ export default function BurialPlots() {
             <DialogTitle>Edit Plot</DialogTitle>
             <DialogDescription>
               {openedFromRequest
-                ? "If opened from Requests, validate/approve payment in Reservations."
-                : "Update plot details. Burial Records are on the left; QR + reservations are on the right."}
+                ? "If opened from Requests, approve or reject inside Reservations."
+                : "Update plot details. Burial Records are on the left, QR and reservations are on the right."}
             </DialogDescription>
           </DialogHeader>
 
@@ -2617,14 +2531,8 @@ export default function BurialPlots() {
                     await refreshPendingRequests();
                     await loadReservationsForPlot({ id: modalRow?.id, uid: modalRow?.uid });
                   }}
-                  onValidatePayment={async (reservationId) => {
-                    await validatePaymentAdmin(reservationId);
-                    await fetchPlots();
-                    await refreshPendingRequests();
-                    await loadReservationsForPlot({ id: modalRow?.id, uid: modalRow?.uid });
-                  }}
-                  onApprovePayment={async (reservationId) => {
-                    await approvePaymentAdmin(reservationId);
+                  onApprove={async (reservationId) => {
+                    await approveReservationAdmin(reservationId);
                     await fetchPlots();
                     await refreshPendingRequests();
                     await loadReservationsForPlot({ id: modalRow?.id, uid: modalRow?.uid });

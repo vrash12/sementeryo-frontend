@@ -2359,162 +2359,199 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
           </div>
         </div>
       </div>
+{/* Details Modal */}
+<Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+  <DialogContent className="sm:max-w-[640px] max-h-[85vh] overflow-hidden p-0">
+    {/* header stays fixed */}
+    <div className="p-6 pb-4">
+      <DialogHeader>
+        <DialogTitle>Reservation Preview</DialogTitle>
+        <DialogDescription>
+          Review visitor/deceased details and selected plot.
+        </DialogDescription>
+      </DialogHeader>
+    </div>
 
-      {/* Details Modal */}
-      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent className="sm:max-w-[640px]">
-          <DialogHeader>
-            <DialogTitle>Reservation Preview</DialogTitle>
-            <DialogDescription>Review visitor/deceased details and selected plot.</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            <div className="rounded-2xl border bg-white p-3 space-y-2">
-              <div className="text-sm font-bold text-slate-900">Visitor (Applicant)</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Full name</div>
-                  <div className="font-semibold text-slate-900">{applicant.full_name || "—"}</div>
-                </div>
-                <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Relationship</div>
-                  <div className="font-semibold text-slate-900">{applicant.relationship || "—"}</div>
-                </div>
-                <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Contact number</div>
-                  <div className="font-semibold text-slate-900">{applicant.contact_number || "—"}</div>
-                </div>
-                <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Email</div>
-                  <div className="font-semibold text-slate-900">{applicant.email || "—"}</div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-slate-50 p-3">
-                <div className="text-xs text-slate-500">Address</div>
-                <div className="font-semibold text-slate-900 break-words">{applicant.address || "—"}</div>
+    {/* scrollable body */}
+    <div className="px-6 pb-6 overflow-y-auto max-h-[calc(85vh-160px)]">
+      <div className="space-y-3">
+        <div className="rounded-2xl border bg-white p-3 space-y-2">
+          <div className="text-sm font-bold text-slate-900">Visitor (Applicant)</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+            <div className="rounded-2xl border bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Full name</div>
+              <div className="font-semibold text-slate-900">
+                {applicant.full_name || "—"}
               </div>
             </div>
-
-            <div className="rounded-2xl border bg-white p-3 space-y-2">
-              <div className="text-sm font-bold text-slate-900">Deceased</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Full name</div>
-                  <div className="font-semibold text-slate-900">{deceased.full_name || "—"}</div>
-                </div>
-                <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Age</div>
-                  <div className="font-semibold text-slate-900">{deceased.age || "—"}</div>
-                </div>
-                <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Date of death</div>
-                  <div className="font-semibold text-slate-900">{deceased.date_of_death || "—"}</div>
-                </div>
-                <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Date of burial</div>
-                  <div className="font-semibold text-slate-900">{deceased.date_of_burial || "—"}</div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-slate-50 p-3">
-                <div className="text-xs text-slate-500">Remarks</div>
-                <div className="font-semibold text-slate-900 break-words">{deceased.remarks || "—"}</div>
+            <div className="rounded-2xl border bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Relationship</div>
+              <div className="font-semibold text-slate-900">
+                {applicant.relationship || "—"}
               </div>
             </div>
-
-            <div className="rounded-2xl border bg-white p-3 space-y-2">
-              <div className="text-sm font-bold text-slate-900">Selected plot</div>
-
-              {!selectedPlot ? (
-                <Alert className="rounded-2xl">
-                  <AlertTitle>No plot selected</AlertTitle>
-                  <AlertDescription>Please select an available plot on the map.</AlertDescription>
-                </Alert>
-              ) : (
-                <div className="rounded-2xl border bg-white p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="text-base font-bold text-slate-900">{selectedPlot.plot_name ?? "—"}</div>
-                      <div className="text-sm text-slate-600">
-                        {selectedPlot.plot_type ?? "—"} • {selectedPlot.size_sqm ?? "—"} sqm
-                      </div>
-                    </div>
-                    <Badge className={statusBadgeProps(selectedPlot.status).className}>
-                      {statusBadgeProps(selectedPlot.status).label}
-                    </Badge>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                    <div className="rounded-2xl border bg-slate-50 p-3">
-                      <div className="text-xs text-slate-500">Price</div>
-                      <div className="font-bold text-slate-900">₱{formatPrice(selectedPlot.price)}</div>
-                    </div>
-                    <div className="rounded-2xl border bg-slate-50 p-3">
-                      <div className="text-xs text-slate-500">Type</div>
-                      <div className="font-bold text-slate-900">{selectedPlot.plot_type ?? "—"}</div>
-                    </div>
-                  </div>
-                </div>
-              )}
+            <div className="rounded-2xl border bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Contact number</div>
+              <div className="font-semibold text-slate-900">
+                {applicant.contact_number || "—"}
+              </div>
             </div>
-
-            <div className="rounded-2xl border bg-white p-3 text-sm text-slate-700">
-              <div className="font-semibold mb-1">Notes that will be sent</div>
-              <pre className="whitespace-pre-wrap break-words text-slate-700 text-xs">
-                {composedNotesForSubmit || "—"}
-              </pre>
+            <div className="rounded-2xl border bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Email</div>
+              <div className="font-semibold text-slate-900">
+                {applicant.email || "—"}
+              </div>
             </div>
           </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setDetailsOpen(false)} className="rounded-xl">
-              Close
-            </Button>
+          <div className="rounded-2xl border bg-slate-50 p-3">
+            <div className="text-xs text-slate-500">Address</div>
+            <div className="font-semibold text-slate-900 break-words">
+              {applicant.address || "—"}
+            </div>
+          </div>
+        </div>
 
-            {step === 1 ? (
-              <Button
-                onClick={() => {
-                  setDetailsOpen(false);
-                  goToMapStep();
-                }}
-                disabled={!isVisitorLoggedIn || !infoValid}
-                className="rounded-xl"
-              >
-                Continue to map
-                <ArrowRight className="h-4 w-4 ml-2" />
-              </Button>
-            ) : step === 2 ? (
-              <Button
-                onClick={() => {
-                  setDetailsOpen(false);
-                  goToConfirmStep();
-                }}
-                disabled={!selectedPlot || !isVisitorLoggedIn || !canReserve || !infoValid}
-                className="rounded-xl"
-              >
-                Continue
-                <ArrowRight className="h-4 w-4 ml-2" />
-              </Button>
-            ) : step === 3 ? (
-              <Button
-                className="bg-emerald-600 hover:bg-emerald-700 rounded-xl"
-                onClick={() => {
-                  setDetailsOpen(false);
-                  submitReservation();
-                }}
-                disabled={!isVisitorLoggedIn || submitting || !canReserve || !selectedPlot || !infoValid}
-              >
-                Submit reservation
-              </Button>
-            ) : (
-              <Button onClick={() => setDetailsOpen(false)} className="rounded-xl">
-                Okay
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        <div className="rounded-2xl border bg-white p-3 space-y-2">
+          <div className="text-sm font-bold text-slate-900">Deceased</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+            <div className="rounded-2xl border bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Full name</div>
+              <div className="font-semibold text-slate-900">
+                {deceased.full_name || "—"}
+              </div>
+            </div>
+            <div className="rounded-2xl border bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Age</div>
+              <div className="font-semibold text-slate-900">
+                {deceased.age || "—"}
+              </div>
+            </div>
+            <div className="rounded-2xl border bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Date of death</div>
+              <div className="font-semibold text-slate-900">
+                {deceased.date_of_death || "—"}
+              </div>
+            </div>
+            <div className="rounded-2xl border bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Date of burial</div>
+              <div className="font-semibold text-slate-900">
+                {deceased.date_of_burial || "—"}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-slate-50 p-3">
+            <div className="text-xs text-slate-500">Remarks</div>
+            <div className="font-semibold text-slate-900 break-words">
+              {deceased.remarks || "—"}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border bg-white p-3 space-y-2">
+          <div className="text-sm font-bold text-slate-900">Selected plot</div>
+
+          {!selectedPlot ? (
+            <Alert className="rounded-2xl">
+              <AlertTitle>No plot selected</AlertTitle>
+              <AlertDescription>Please select an available plot on the map.</AlertDescription>
+            </Alert>
+          ) : (
+            <div className="rounded-2xl border bg-white p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-base font-bold text-slate-900">
+                    {selectedPlot.plot_name ?? "—"}
+                  </div>
+                  <div className="text-sm text-slate-600">
+                    {selectedPlot.plot_type ?? "—"} • {selectedPlot.size_sqm ?? "—"} sqm
+                  </div>
+                </div>
+                <Badge className={statusBadgeProps(selectedPlot.status).className}>
+                  {statusBadgeProps(selectedPlot.status).label}
+                </Badge>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-2xl border bg-slate-50 p-3">
+                  <div className="text-xs text-slate-500">Price</div>
+                  <div className="font-bold text-slate-900">
+                    ₱{formatPrice(selectedPlot.price)}
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-slate-50 p-3">
+                  <div className="text-xs text-slate-500">Type</div>
+                  <div className="font-bold text-slate-900">
+                    {selectedPlot.plot_type ?? "—"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border bg-white p-3 text-sm text-slate-700">
+          <div className="font-semibold mb-1">Notes that will be sent</div>
+          <pre className="whitespace-pre-wrap break-words text-slate-700 text-xs">
+            {composedNotesForSubmit || "—"}
+          </pre>
+        </div>
+      </div>
+    </div>
+
+    {/* footer stays fixed */}
+    <div className="border-t bg-white px-6 py-4">
+      <DialogFooter className="gap-2 sm:gap-0">
+        <Button variant="outline" onClick={() => setDetailsOpen(false)} className="rounded-xl">
+          Close
+        </Button>
+
+        {step === 1 ? (
+          <Button
+            onClick={() => {
+              setDetailsOpen(false);
+              goToMapStep();
+            }}
+            disabled={!isVisitorLoggedIn || !infoValid}
+            className="rounded-xl"
+          >
+            Continue to map
+            <ArrowRight className="h-4 w-4 ml-2" />
+          </Button>
+        ) : step === 2 ? (
+          <Button
+            onClick={() => {
+              setDetailsOpen(false);
+              goToConfirmStep();
+            }}
+            disabled={!selectedPlot || !isVisitorLoggedIn || !canReserve || !infoValid}
+            className="rounded-xl"
+          >
+            Continue
+            <ArrowRight className="h-4 w-4 ml-2" />
+          </Button>
+        ) : step === 3 ? (
+          <Button
+            className="bg-emerald-600 hover:bg-emerald-700 rounded-xl"
+            onClick={() => {
+              setDetailsOpen(false);
+              submitReservation();
+            }}
+            disabled={!isVisitorLoggedIn || submitting || !canReserve || !selectedPlot || !infoValid}
+          >
+            Submit reservation
+          </Button>
+        ) : (
+          <Button onClick={() => setDetailsOpen(false)} className="rounded-xl">
+            Okay
+          </Button>
+        )}
+      </DialogFooter>
+    </div>
+  </DialogContent>
+</Dialog>
+
 
       {/* Cancel confirm modal */}
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>

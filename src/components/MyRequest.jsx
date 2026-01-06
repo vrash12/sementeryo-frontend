@@ -9,6 +9,7 @@ import { Separator } from "./ui/separator";
 import { Alert, AlertDescription } from "./ui/alert";
 import { ClipboardList, Wrench, CheckCircle2, Clock, XCircle, X, RefreshCw } from "lucide-react";
 
+
 const API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "";
 
@@ -215,15 +216,6 @@ export default function MyRequest({ open, onOpenChange }) {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="burial" className="mt-4">
-            <SectionHeader title="Burial Requests" description="Requests related to burial scheduling and verification." onRefresh={() => fetchList("burial")} loading={loading.burial} />
-            <RequestGrid type="burial" rows={burial} loading={loading.burial} onCancel={handleCancel} />
-          </TabsContent>
-
-          <TabsContent value="maintenance" className="mt-4">
-            <SectionHeader title="Maintenance Requests" description="Requests for plot or grounds maintenance." onRefresh={() => fetchList("maintenance")} loading={loading.maintenance} />
-            <RequestGrid type="maintenance" rows={maintenance} loading={loading.maintenance} onCancel={handleCancel} />
-          </TabsContent>
         </Tabs>
       </DialogContent>
     </Dialog>

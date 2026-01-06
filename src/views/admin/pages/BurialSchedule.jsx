@@ -28,7 +28,7 @@ import {
 } from "../../../components/ui/select";
 import { Badge } from "../../../components/ui/badge";
 import { ScrollArea } from "../../../components/ui/scroll-area";
-import { Skeleton } from "../../../components/ui/skeleton";
+
 import {
   Eye,
   Search,
