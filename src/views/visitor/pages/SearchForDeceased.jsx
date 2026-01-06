@@ -598,6 +598,7 @@ export default function SearchForDeceased() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+const [isRequestingLoc, setIsRequestingLoc] = useState(false);
 
   // ✅ plots/graves for map rendering
   const [plotsFc, setPlotsFc] = useState(null);
@@ -759,135 +760,137 @@ export default function SearchForDeceased() {
     if (!userLocation && !locationConsent) setLocationModalOpen(true);
   }, [mapCoords, userLocation, locationConsent]);
 
-  const requestUserLocation = useCallback(() => {
-    setLocationConsent(true);
-    setLocationModalOpen(false);
 
-    hasGoodLocationRef.current = false;
-    setUserLocation(null);
-    setLocationSource("none");
-    setRouteStatus("Requesting your location…");
+const requestUserLocation = useCallback(() => {
+  setIsRequestingLoc(true);            // ✅ start guard
+  setLocationConsent(true);
+  setLocationModalOpen(false);
 
-    if (!("geolocation" in navigator)) {
-      setUserLocation(DEFAULT_START);
-      setLocationSource("entrance");
-      setRouteStatus("Geolocation not supported. Starting from cemetery entrance.");
-      return;
-    }
+  hasGoodLocationRef.current = false;
+  setUserLocation(null);
+  setLocationSource("none");
+  setRouteStatus("Requesting your location…");
 
-    if (!isSecureForDeviceAPIs()) {
-      setUserLocation(DEFAULT_START);
-      setLocationSource("entrance");
-      setRouteStatus(
-        "Location blocked by browser (needs HTTPS or localhost). Starting from cemetery entrance."
-      );
-      return;
-    }
+  if (!("geolocation" in navigator)) {
+    setUserLocation(DEFAULT_START);
+    setLocationSource("entrance");
+    setRouteStatus("Geolocation not supported. Starting from cemetery entrance.");
+    setIsRequestingLoc(false);         // ✅ end guard
+    return;
+  }
 
-    // clear old watch if any
-    if (geoWatchIdRef.current) {
-      navigator.geolocation.clearWatch(geoWatchIdRef.current);
-      geoWatchIdRef.current = null;
-    }
+  if (!isSecureForDeviceAPIs()) {
+    setUserLocation(DEFAULT_START);
+    setLocationSource("entrance");
+    setRouteStatus(
+      "Location blocked by browser (needs HTTPS or localhost). Starting from cemetery entrance."
+    );
+    setIsRequestingLoc(false);         // ✅ end guard
+    return;
+  }
 
-    const startWatch = () => {
-      geoWatchIdRef.current = navigator.geolocation.watchPosition(
-        (position) => {
-          const { latitude, longitude, accuracy } = position.coords;
-          const loc = { lat: latitude, lng: longitude };
+  if (geoWatchIdRef.current) {
+    navigator.geolocation.clearWatch(geoWatchIdRef.current);
+    geoWatchIdRef.current = null;
+  }
 
-          // ✅ Live updates only while inside geofence
-          const inside = isInsideGeofence(loc.lat, loc.lng);
-          if (!inside) {
-            if (geoWatchIdRef.current) {
-              navigator.geolocation.clearWatch(geoWatchIdRef.current);
-              geoWatchIdRef.current = null;
-            }
-            setRouteStatus(
-              "You left the cemetery boundary. Live GPS updates stopped. Using last known location."
-            );
-            return;
-          }
-
-          hasGoodLocationRef.current = true;
-          setUserLocation(loc);
-          setLocationSource("gps");
-          setRouteStatus(`Live location ✅ (±${Math.round(accuracy || 0)}m)`);
-        },
-        (err) => {
-          console.warn("watchPosition error:", err);
-          if (!hasGoodLocationRef.current) {
-            setUserLocation(DEFAULT_START);
-            setLocationSource("entrance");
-            setRouteStatus("Location updates failed. Starting from cemetery entrance.");
-          } else {
-            setRouteStatus("Location updates stopped. Using last known location.");
-          }
-        },
-        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
-      );
-    };
-
-    navigator.geolocation.getCurrentPosition(
+  const startWatch = () => {
+    geoWatchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude, accuracy } = position.coords;
         const loc = { lat: latitude, lng: longitude };
 
-        // ✅ First check: inside cemetery?
         const inside = isInsideGeofence(loc.lat, loc.lng);
-
         if (!inside) {
-          setUserLocation(DEFAULT_START);
-          setLocationSource("entrance");
+          if (geoWatchIdRef.current) {
+            navigator.geolocation.clearWatch(geoWatchIdRef.current);
+            geoWatchIdRef.current = null;
+          }
           setRouteStatus(
-            "You are outside the cemetery boundary. Live GPS is only available inside. Starting from cemetery entrance."
+            "You left the cemetery boundary. Live GPS updates stopped. Using last known location."
           );
-          return; // ✅ do NOT start watchPosition
+          return;
         }
 
         hasGoodLocationRef.current = true;
         setUserLocation(loc);
         setLocationSource("gps");
-        setRouteStatus(`Location acquired ✅ (±${Math.round(accuracy || 0)}m)`);
-
-        // ✅ only start live updates when inside
-        startWatch();
+        setRouteStatus(`Live location ✅ (±${Math.round(accuracy || 0)}m)`);
       },
       (err) => {
-        console.warn("Geolocation error:", err);
+        console.warn("watchPosition error:", err);
+        if (!hasGoodLocationRef.current) {
+          setUserLocation(DEFAULT_START);
+          setLocationSource("entrance");
+          setRouteStatus("Location updates failed. Starting from cemetery entrance.");
+        } else {
+          setRouteStatus("Location updates stopped. Using last known location.");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+    );
+  };
 
-        const code = err?.code;
-        const msg =
-          code === 1
-            ? "Location permission denied."
-            : code === 2
-            ? "Location unavailable. Turn on GPS / Location Services and try again."
-            : code === 3
-            ? "Location timed out. Try again (better signal) or use the entrance."
-            : "Could not get your location.";
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const { latitude, longitude, accuracy } = position.coords;
+      const loc = { lat: latitude, lng: longitude };
 
+      const inside = isInsideGeofence(loc.lat, loc.lng);
+
+      if (!inside) {
         setUserLocation(DEFAULT_START);
         setLocationSource("entrance");
-        setRouteStatus(`${msg} Starting from cemetery entrance.`);
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
-  }, [DEFAULT_START]);
+        setRouteStatus(
+          "You are outside the cemetery boundary. Live GPS is only available inside. Starting from cemetery entrance."
+        );
+        setIsRequestingLoc(false);     // ✅ end guard
+        return;
+      }
 
-  const useDefaultLocation = useCallback(() => {
-    setLocationConsent(true);
-    setLocationModalOpen(false);
-    setUserLocation(DEFAULT_START);
-    setLocationSource("entrance");
-    if (!routeStatus) setRouteStatus("Starting route from cemetery entrance.");
-  }, [DEFAULT_START, routeStatus]);
+      hasGoodLocationRef.current = true;
+      setUserLocation(loc);
+      setLocationSource("gps");
+      setRouteStatus(`Location acquired ✅ (±${Math.round(accuracy || 0)}m)`);
 
-  useEffect(() => {
-    return () => {
-      if (geoWatchIdRef.current)
-        navigator.geolocation.clearWatch(geoWatchIdRef.current);
-    };
-  }, []);
+      startWatch();
+      setIsRequestingLoc(false);       // ✅ end guard
+    },
+    (err) => {
+      console.warn("Geolocation error:", err);
+
+      const code = err?.code;
+      const msg =
+        code === 1
+          ? "Location permission denied."
+          : code === 2
+          ? "Location unavailable. Turn on GPS / Location Services and try again."
+          : code === 3
+          ? "Location timed out. Try again (better signal) or use the entrance."
+          : "Could not get your location.";
+
+      setUserLocation(DEFAULT_START);
+      setLocationSource("entrance");
+      setRouteStatus(`${msg} Starting from cemetery entrance.`);
+      setIsRequestingLoc(false);       // ✅ end guard
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  );
+}, [DEFAULT_START]);
+
+const useDefaultLocation = useCallback(() => {
+  setIsRequestingLoc(false);           // ✅ clear guard
+  setLocationConsent(true);
+  setLocationModalOpen(false);
+  setUserLocation(DEFAULT_START);
+  setLocationSource("entrance");
+  if (!routeStatus) setRouteStatus("Starting route from cemetery entrance.");
+}, [DEFAULT_START, routeStatus]);
+
+
+
+
+
 
   // -------------------------- Compute / update route ------------------------
   useEffect(() => {
@@ -2268,17 +2271,23 @@ export default function SearchForDeceased() {
         </DialogContent>
       </Dialog>
 
-      {/* Location Permission Modal */}
-      <Dialog
-        open={locationModalOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            useDefaultLocation();
-            return;
-          }
-          setLocationModalOpen(true);
-        }}
-      >
+<Dialog
+  open={locationModalOpen}
+  onOpenChange={(open) => {
+    if (!open) {
+      setLocationModalOpen(false);
+
+      // ✅ only default to entrance if user did NOT click Allow
+      if (!locationConsent && !isRequestingLoc) {
+        useDefaultLocation();
+      }
+      return;
+    }
+
+    setLocationModalOpen(true);
+  }}
+>
+
         <DialogContent
           className="sm:max-w-md rounded-2xl"
           onInteractOutside={(e) => e.preventDefault()}

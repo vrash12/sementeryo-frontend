@@ -1,7 +1,7 @@
 // frontend/src/views/admin/pages/BurialRecords.jsx
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getAuth } from "../../../utils/auth";
-import { Toaster, toast } from "sonner";
+import { Toaster } from "sonner";
 
 import { RefreshCcw, Search, Loader2, XCircle, MapPin, Info } from "lucide-react";
 
@@ -42,11 +42,6 @@ import {
   SelectItem,
 } from "../../../components/ui/select";
 
-/**
- * ✅ This page shows PLOTS (instead of burial records)
- * - List:   GET /api/plot/
- * - Detail: GET /api/admin/plot/:idOrUid
- */
 const API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "/api";
 
@@ -91,7 +86,7 @@ function extractList(body) {
 }
 
 function extractPlotRows(body) {
-  // If backend returns GeoJSON FeatureCollection
+  // GeoJSON FeatureCollection
   if (body?.type === "FeatureCollection" && Array.isArray(body?.features)) {
     return body.features.map((f) => ({
       ...(f?.properties || {}),
@@ -99,10 +94,9 @@ function extractPlotRows(body) {
     }));
   }
 
-  // If backend returns plain array
+  // plain array or wrapped array
   if (Array.isArray(body)) return body;
 
-  // If backend returns wrapped array
   const arr = extractList(body);
   if (Array.isArray(arr) && arr.length) return arr;
 
@@ -124,12 +118,7 @@ function statusBadgeProps(statusRaw) {
   return { label: statusRaw || "—", className: "bg-slate-500 hover:bg-slate-500" };
 }
 
-function money(v) {
-  if (v == null || v === "") return "—";
-  const n = Number(v);
-  if (!Number.isFinite(n)) return String(v);
-  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-}
+const safeLower = (v) => String(v || "").toLowerCase();
 
 export default function BurialRecords() {
   const auth = getAuth();
@@ -156,6 +145,10 @@ export default function BurialRecords() {
   // search
   const [qInput, setQInput] = useState("");
   const q = useDebouncedValue(qInput, 180);
+
+  // NEW: filters for deceased list
+  const [deceasedOnly, setDeceasedOnly] = useState(true); // ✅ default ON
+  const [statusFilter, setStatusFilter] = useState("occupied"); // ✅ default occupied
 
   // pagination
   const [page, setPage] = useState(1);
@@ -199,7 +192,9 @@ export default function BurialRecords() {
     try {
       const body = await fetchAny(ENDPOINTS.listPlots);
       const list = extractPlotRows(body);
-      setRows(list);
+
+      // ✅ always keep data consistent
+      setRows(Array.isArray(list) ? list : []);
     } catch (e) {
       setRows([]);
       setErr(String(e?.message || e));
@@ -215,41 +210,54 @@ export default function BurialRecords() {
   /* ---------------- filters ---------------- */
   const filtered = useMemo(() => {
     const text = q.trim().toLowerCase();
-    if (!text) return rows;
 
-    return (rows || []).filter((r) => {
-      const bag = [
-        r?.id,
-        r?.uid,
-        r?.plot_name,
-        r?.plot_code,
-        r?.plot_type,
-        r?.status,
-        r?.person_full_name, // ✅ full name searchable
-        r?.next_of_kin_name,
-        r?.contact_phone,
-        r?.contact_email,
-        r?.notes,
-      ]
-        .filter((v) => v != null)
-        .map((v) => String(v).toLowerCase())
-        .join(" ");
+    return (rows || [])
+      .filter((r) => {
+        // ✅ deceased list filter (plots.person_full_name)
+        if (deceasedOnly && !isTruthyStr(r?.person_full_name)) return false;
 
-      return bag.includes(text);
-    });
-  }, [rows, q]);
+        // ✅ status filter
+        const s = safeLower(r?.status);
+        if (statusFilter !== "all" && s !== safeLower(statusFilter)) return false;
 
-  // ✅ reset to page 1 whenever search changes
+        return true;
+      })
+      .filter((r) => {
+        if (!text) return true;
+
+        const bag = [
+          r?.id,
+          r?.uid,
+          r?.plot_name,
+          r?.plot_code,
+          r?.plot_type,
+          r?.status,
+          r?.person_full_name,
+          r?.date_of_birth,
+          r?.date_of_death,
+          r?.next_of_kin_name,
+          r?.contact_phone,
+          r?.contact_email,
+          r?.notes,
+        ]
+          .filter((v) => v != null)
+          .map((v) => String(v).toLowerCase())
+          .join(" ");
+
+        return bag.includes(text);
+      });
+  }, [rows, q, deceasedOnly, statusFilter]);
+
+  // reset to page 1 when filters/search changes
   useEffect(() => {
     setPage(1);
-  }, [q, pageSize]);
+  }, [q, pageSize, deceasedOnly, statusFilter]);
 
   const totalPages = useMemo(() => {
     const n = Math.ceil((filtered?.length || 0) / pageSize);
     return n > 0 ? n : 1;
   }, [filtered, pageSize]);
 
-  // ✅ keep page in range (e.g., when filtering reduces rows)
   useEffect(() => {
     setPage((p) => {
       if (p < 1) return 1;
@@ -295,16 +303,15 @@ export default function BurialRecords() {
     [ENDPOINTS, fetchAny]
   );
 
-  /* ---------------- UI ---------------- */
   return (
     <div className="p-6 space-y-6">
       <Toaster richColors expand={false} />
 
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Plots Information</h1>
+          <h1 className="text-2xl font-bold">Burial Records (from Plots)</h1>
           <p className="text-sm text-muted-foreground">
-            This page shows plots info (instead of burial records).
+            This list is taken from plots.person_full_name (deceased), not from graves table.
           </p>
         </div>
 
@@ -316,16 +323,15 @@ export default function BurialRecords() {
         </div>
       </div>
 
-      {/* ✅ Panel note for capstone suggestion */}
-      <Alert className="border-slate-200 bg-slate-50">
-        <Info className="h-4 w-4" />
-        <AlertTitle>Capstone panel note (Burial Record / Scheduling module)</AlertTitle>
-        <AlertDescription className="text-slate-700">
-          Also, for the burial record or schedule module, it says that when a visitor fills up the
-          information, the admin should just select the details that the visitor submitted for the
-          deceased’s information.
-        </AlertDescription>
-      </Alert>
+      {err ? (
+        <Alert variant="destructive" className="border-rose-200">
+          <AlertTitle className="flex items-center gap-2">
+            <XCircle className="h-4 w-4" />
+            Failed to load plots
+          </AlertTitle>
+          <AlertDescription className="break-words">{err}</AlertDescription>
+        </Alert>
+      ) : null}
 
       <Card>
         <CardContent className="pt-6">
@@ -337,23 +343,39 @@ export default function BurialRecords() {
                 <Input
                   value={qInput}
                   onChange={(e) => setQInput(e.target.value)}
-                  placeholder="Search by plot name, full name, uid, status, contact…"
+                  placeholder="Search by deceased name, plot name, id, uid, status…"
                   className="pl-9 w-[520px] max-w-full"
                 />
               </div>
             </div>
 
-            <div className="flex items-center gap-3 justify-between lg:justify-end">
-              <div className="text-sm text-slate-600">
-                {showingRange.total ? (
-                  <>
-                    Showing <span className="font-medium">{showingRange.from}</span>–
-                    <span className="font-medium">{showingRange.to}</span> of{" "}
-                    <span className="font-medium">{showingRange.total}</span>
-                  </>
-                ) : (
-                  <>Showing 0 of 0</>
-                )}
+            <div className="flex flex-wrap items-end gap-3 justify-between lg:justify-end">
+              <div className="min-w-[180px]">
+                <Label className="text-xs text-slate-500">Show</Label>
+                <Select value={deceasedOnly ? "deceased" : "all"} onValueChange={(v) => setDeceasedOnly(v === "deceased")}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="deceased">Deceased only</SelectItem>
+                    <SelectItem value="all">All plots</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="min-w-[180px]">
+                <Label className="text-xs text-slate-500">Status</Label>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="occupied">Occupied</SelectItem>
+                    <SelectItem value="reserved">Reserved</SelectItem>
+                    <SelectItem value="available">Available</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="min-w-[160px]">
@@ -369,6 +391,18 @@ export default function BurialRecords() {
                     <SelectItem value="100">100</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="text-sm text-slate-600">
+                {showingRange.total ? (
+                  <>
+                    Showing <span className="font-medium">{showingRange.from}</span>–
+                    <span className="font-medium">{showingRange.to}</span> of{" "}
+                    <span className="font-medium">{showingRange.total}</span>
+                  </>
+                ) : (
+                  <>Showing 0 of 0</>
+                )}
               </div>
             </div>
           </div>
@@ -413,20 +447,12 @@ export default function BurialRecords() {
         </CardContent>
       </Card>
 
-      {err ? (
-        <Alert variant="destructive" className="border-rose-200">
-          <AlertTitle className="flex items-center gap-2">
-            <XCircle className="h-4 w-4" />
-            Failed to load plots
-          </AlertTitle>
-          <AlertDescription className="break-words">{err}</AlertDescription>
-        </Alert>
-      ) : null}
-
       <Card className="bg-white/80 backdrop-blur border-slate-200">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Plots</CardTitle>
-          <CardDescription>Searchable + paginated list</CardDescription>
+          <CardTitle className="text-base">Deceased list in plots</CardTitle>
+          <CardDescription>
+            Uses plots.person_full_name (and date_of_death if present).
+          </CardDescription>
         </CardHeader>
 
         <CardContent>
@@ -436,19 +462,20 @@ export default function BurialRecords() {
               Loading…
             </div>
           ) : !filtered.length ? (
-            <div className="text-sm text-slate-600">No plots found.</div>
+            <div className="text-sm text-slate-600">
+              No rows found. If you expect data, check that plots.person_full_name is filled and status is occupied.
+            </div>
           ) : (
             <div className="rounded-md border overflow-hidden">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>ID</TableHead>
+                    <TableHead>Plot ID</TableHead>
                     <TableHead>Plot</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Full Name</TableHead>
-                    <TableHead className="text-right">Size (sqm)</TableHead>
-                    <TableHead className="text-right">Price</TableHead>
+                    <TableHead>Deceased (person_full_name)</TableHead>
+                    <TableHead>DOB</TableHead>
+                    <TableHead>DOD</TableHead>
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -483,22 +510,14 @@ export default function BurialRecords() {
                           <Badge className={s.className}>{s.label}</Badge>
                         </TableCell>
 
-                        <TableCell className="text-sm">{r?.plot_type ?? "—"}</TableCell>
-
                         <TableCell>
                           <div className="text-sm font-medium text-slate-900">
                             {r?.person_full_name ?? "—"}
                           </div>
-                          {r?.date_of_death ? (
-                            <div className="text-xs text-slate-500">
-                              DOD: {formatDate(r.date_of_death)}
-                            </div>
-                          ) : null}
                         </TableCell>
 
-                        <TableCell className="text-right text-sm">{r?.size_sqm ?? "—"}</TableCell>
-
-                        <TableCell className="text-right text-sm">{money(r?.price)}</TableCell>
+                        <TableCell className="text-sm">{formatDate(r?.date_of_birth)}</TableCell>
+                        <TableCell className="text-sm">{formatDate(r?.date_of_death)}</TableCell>
 
                         <TableCell className="text-right">
                           <Button size="sm" variant="outline" onClick={() => openDetails(r)}>
@@ -550,114 +569,27 @@ export default function BurialRecords() {
               Loading details…
             </div>
           ) : details ? (
-            <div className="space-y-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Plot</CardTitle>
-                  <CardDescription>Core fields</CardDescription>
-                </CardHeader>
-                <CardContent className="text-sm space-y-2">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <div className="text-xs text-slate-500">Plot Name</div>
-                      <div className="font-medium">{details.plot_name ?? "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">UID</div>
-                      <div className="font-medium">{details.uid ?? "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Status</div>
-                      <div className="font-medium">{details.status ?? "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Type</div>
-                      <div className="font-medium">{details.plot_type ?? "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Size (sqm)</div>
-                      <div className="font-medium">{details.size_sqm ?? "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Price</div>
-                      <div className="font-medium">{money(details.price)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Lat</div>
-                      <div className="font-medium">{details.lat ?? "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Lng</div>
-                      <div className="font-medium">{details.lng ?? "—"}</div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+            <div className="text-sm space-y-2">
+              <div className="rounded-md border p-3 bg-white">
+                <div className="text-xs text-slate-500">Person Full Name</div>
+                <div className="font-medium">{details.person_full_name ?? "—"}</div>
+              </div>
 
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Occupant / Contact</CardTitle>
-                  <CardDescription>Personal fields stored in plots</CardDescription>
-                </CardHeader>
-                <CardContent className="text-sm space-y-2">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <div className="text-xs text-slate-500">Person Full Name</div>
-                      <div className="font-medium">{details.person_full_name ?? "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Next of Kin</div>
-                      <div className="font-medium">{details.next_of_kin_name ?? "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Date of Birth</div>
-                      <div className="font-medium">{formatDate(details.date_of_birth)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Date of Death</div>
-                      <div className="font-medium">{formatDate(details.date_of_death)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Phone</div>
-                      <div className="font-medium">{details.contact_phone ?? "—"}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Email</div>
-                      <div className="font-medium">{details.contact_email ?? "—"}</div>
-                    </div>
-                  </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="rounded-md border p-3 bg-white">
+                  <div className="text-xs text-slate-500">Date of Birth</div>
+                  <div className="font-medium">{formatDate(details.date_of_birth)}</div>
+                </div>
+                <div className="rounded-md border p-3 bg-white">
+                  <div className="text-xs text-slate-500">Date of Death</div>
+                  <div className="font-medium">{formatDate(details.date_of_death)}</div>
+                </div>
+              </div>
 
-                  <div className="pt-2">
-                    <div className="text-xs text-slate-500">Notes</div>
-                    <div className="whitespace-pre-wrap rounded-md border p-3 bg-white">
-                      {details.notes ?? "—"}
-                    </div>
-                  </div>
-
-                  {details.photo_url ? (
-                    <div className="pt-2">
-                      <div className="text-xs text-slate-500">Photo</div>
-                      <a
-                        href={String(details.photo_url)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-600 underline"
-                      >
-                        Open photo
-                      </a>
-                    </div>
-                  ) : null}
-
-                  {details.qr_token ? (
-                    <div className="pt-2">
-                      <div className="text-xs text-slate-500">QR Token</div>
-                      <div className="font-mono text-xs break-all rounded-md border p-3 bg-white">
-                        {String(details.qr_token)}
-                      </div>
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
+              <div className="rounded-md border p-3 bg-white">
+                <div className="text-xs text-slate-500">Notes</div>
+                <div className="whitespace-pre-wrap">{details.notes ?? "—"}</div>
+              </div>
             </div>
           ) : (
             <div className="text-sm text-slate-600">No details.</div>
@@ -672,14 +604,7 @@ export default function BurialRecords() {
             >
               Close
             </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                toast.success("Refreshed.");
-                load();
-              }}
-              disabled={loading}
-            >
+            <Button type="button" onClick={load} disabled={loading}>
               <RefreshCcw className="mr-2 h-4 w-4" />
               Refresh list
             </Button>

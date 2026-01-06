@@ -7,58 +7,92 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
 import { Alert, AlertDescription } from "./ui/alert";
-import {
-  ClipboardList,
-  Wrench,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  X,
-  RefreshCw,
-} from "lucide-react";
+import { ClipboardList, Wrench, CheckCircle2, Clock, XCircle, X, RefreshCw } from "lucide-react";
 
-// 🔧 Base URL
 const API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "";
 
-// Endpoints
+function readAuth() {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem("auth");
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function getToken(auth) {
+  return auth?.accessToken || auth?.token || auth?.jwt || "";
+}
+
+function getUserId(auth) {
+  // IMPORTANT: backend expects the visitor user id for :family_contact
+  return auth?.user?.id ?? auth?.user?.user_id ?? null;
+}
+
+async function fetchFirstOk(urls, options) {
+  let lastErr = null;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, options);
+      const ct = res.headers.get("content-type") || "";
+      const body = ct.includes("application/json")
+        ? await res.json().catch(() => ({}))
+        : await res.text().catch(() => "");
+
+      if (res.ok) return { res, body, url };
+
+      const msg =
+        typeof body === "string"
+          ? body
+          : body?.message || body?.error || `HTTP ${res.status}`;
+
+      if (res.status === 404) {
+        lastErr = new Error(msg);
+        continue;
+      }
+
+      throw new Error(msg);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("Request failed");
+}
+
 const PATHS = {
-  burialList: (id) => `/visitor/my-burial-requests/${encodeURIComponent(id)}`,
-  maintenanceList: (id) => `/visitor/my-maintenance-requests/${encodeURIComponent(id)}`,
-  cancelBurial: (id) => `/visitor/request-burial/cancel/${encodeURIComponent(id)}`,
-  cancelMaintenance: (id) => `/request-maintenance/cancel/${encodeURIComponent(id)}`,
+  burialList: (id) => [
+    `/visitor/my-burial-requests/${encodeURIComponent(id)}`,
+    `/visitor/burial-requests/${encodeURIComponent(id)}`,
+  ],
+  maintenanceList: (id) => [
+    `/visitor/my-maintenance-requests/${encodeURIComponent(id)}`,
+    `/visitor/maintenance-requests/${encodeURIComponent(id)}`,
+  ],
+  cancelBurial: (id) => [
+    `/visitor/request-burial/cancel/${encodeURIComponent(id)}`,
+    `/visitor/burial-request/${encodeURIComponent(id)}/cancel`,
+    `/visitor/cancel-burial-request/${encodeURIComponent(id)}`,
+  ],
+  cancelMaintenance: (id) => [
+    `/visitor/request-maintenance/cancel/${encodeURIComponent(id)}`,
+  ],
 };
 
 export default function MyRequest({ open, onOpenChange }) {
-  // read auth once per render
-  const authRaw = typeof window !== "undefined" ? localStorage.getItem("auth") : null;
-  const auth = useMemo(() => {
-    try {
-      return authRaw ? JSON.parse(authRaw) : null;
-    } catch {
-      return null;
-    }
-  }, [authRaw]);
+  const auth = useMemo(() => readAuth(), []);
+  const token = useMemo(() => getToken(auth), [auth]);
+  const requestOwnerId = useMemo(() => getUserId(auth), [auth]);
 
-  // stable id to use for requests
-  const requestOwnerId = useMemo(
-    () =>
-      auth?.user?.id ??
-      auth?.user?.user_id ??
-      auth?.user?.phone ??
-      auth?.user?.family_contact ??
-      null,
-    [auth]
-  );
-
-  // stable headers
   const headers = useMemo(
     () => ({
       Accept: "application/json",
       "Content-Type": "application/json",
-      ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     }),
-    [auth?.token]
+    [token]
   );
 
   const [tab, setTab] = useState("burial");
@@ -67,78 +101,81 @@ export default function MyRequest({ open, onOpenChange }) {
   const [loading, setLoading] = useState({ burial: false, maintenance: false });
   const [msg, setMsg] = useState({ type: "", text: "" });
 
-  // ---- fetch lists (stable deps) ----
   const fetchList = useCallback(
     async (which) => {
       if (!requestOwnerId) {
-        setMsg({ type: "error", text: "Missing user identifier for requests." });
+        setMsg({ type: "error", text: "Missing user id, please login again." });
+        return;
+      }
+      if (!token) {
+        setMsg({ type: "error", text: "Missing token, please login again." });
         return;
       }
 
       const setList = which === "burial" ? setBurial : setMaintenance;
-      const url =
+      const urls =
         which === "burial"
-          ? `${API_BASE}${PATHS.burialList(requestOwnerId)}`
-          : `${API_BASE}${PATHS.maintenanceList(requestOwnerId)}`;
+          ? PATHS.burialList(requestOwnerId).map((p) => `${API_BASE}${p}`)
+          : PATHS.maintenanceList(requestOwnerId).map((p) => `${API_BASE}${p}`);
 
       setLoading((l) => ({ ...l, [which]: true }));
       setMsg({ type: "", text: "" });
 
       try {
-        const res = await fetch(url, { headers });
-        if (!res.ok) throw new Error(`Failed to load ${which} requests (${res.status})`);
-        const json = await res.json().catch(() => ({}));
-        const rows = Array.isArray(json?.data) ? json.data : Array.isArray(json) ? json : [];
+        const { body } = await fetchFirstOk(urls, { headers });
+        const rows = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
         setList(rows);
       } catch (err) {
         setMsg({ type: "error", text: err.message || "Unable to fetch requests." });
+        setList([]);
       } finally {
         setLoading((l) => ({ ...l, [which]: false }));
       }
     },
-    [requestOwnerId, headers]
+    [requestOwnerId, token, headers]
   );
 
-  // load on open
   useEffect(() => {
     if (!open) return;
     fetchList("burial");
     fetchList("maintenance");
   }, [open, fetchList]);
 
-  // ---- cancel request (per type) ----
   async function handleCancel(which, id) {
     setMsg({ type: "", text: "" });
     const list = which === "burial" ? burial : maintenance;
     const setList = which === "burial" ? setBurial : setMaintenance;
 
-    // optimistic update
     const original = [...list];
+
     setList((rows) =>
       rows.map((r) =>
-        String(r.id ?? r.request_id) === String(id) ? { ...r, status: "cancelled" } : r
+        String(r.id ?? r.request_id) === String(id)
+          ? { ...r, status: which === "burial" ? "canceled" : "cancelled" }
+          : r
       )
     );
 
     try {
-      const url =
+      const urls =
         which === "burial"
-          ? `${API_BASE}${PATHS.cancelBurial(id)}`
-          : `${API_BASE}${PATHS.cancelMaintenance(id)}`;
+          ? PATHS.cancelBurial(id).map((p) => `${API_BASE}${p}`)
+          : PATHS.cancelMaintenance(id).map((p) => `${API_BASE}${p}`);
 
-      const res = await fetch(url, {
+      await fetchFirstOk(urls, {
         method: "PATCH",
         headers,
         body: JSON.stringify({ reason: "user-cancelled" }),
       });
-      if (!res.ok) throw new Error(`Cancel failed (${res.status})`);
 
       setMsg({ type: "ok", text: "Request cancelled." });
       setTimeout(() => {
         setMsg((m) => (m.type === "ok" ? { type: "", text: "" } : m));
       }, 2500);
+
+      fetchList(which);
     } catch (err) {
-      setList(original); // revert
+      setList(original);
       setMsg({ type: "error", text: err.message || "Unable to cancel the request." });
     }
   }
@@ -155,11 +192,14 @@ export default function MyRequest({ open, onOpenChange }) {
           </DialogDescription>
         </DialogHeader>
 
-        {/* Alert */}
         {msg.text ? (
           <Alert
             variant={msg.type === "error" ? "destructive" : "default"}
-            className={msg.type === "error" ? "mb-3 bg-rose-50/90 backdrop-blur border-rose-200 shadow-md" : "mb-3 border-emerald-200 bg-emerald-50/90 backdrop-blur text-emerald-700 shadow-md"}
+            className={
+              msg.type === "error"
+                ? "mb-3 bg-rose-50/90 backdrop-blur border-rose-200 shadow-md"
+                : "mb-3 border-emerald-200 bg-emerald-50/90 backdrop-blur text-emerald-700 shadow-md"
+            }
           >
             <AlertDescription>{msg.text}</AlertDescription>
           </Alert>
@@ -176,28 +216,13 @@ export default function MyRequest({ open, onOpenChange }) {
           </TabsList>
 
           <TabsContent value="burial" className="mt-4">
-            <SectionHeader
-              title="Burial Requests"
-              description="Requests related to burial scheduling and verification."
-              onRefresh={() => fetchList("burial")}
-              loading={loading.burial}
-            />
+            <SectionHeader title="Burial Requests" description="Requests related to burial scheduling and verification." onRefresh={() => fetchList("burial")} loading={loading.burial} />
             <RequestGrid type="burial" rows={burial} loading={loading.burial} onCancel={handleCancel} />
           </TabsContent>
 
           <TabsContent value="maintenance" className="mt-4">
-            <SectionHeader
-              title="Maintenance Requests"
-              description="Requests for plot or grounds maintenance."
-              onRefresh={() => fetchList("maintenance")}
-              loading={loading.maintenance}
-            />
-            <RequestGrid
-              type="maintenance"
-              rows={maintenance}
-              loading={loading.maintenance}
-              onCancel={handleCancel}
-            />
+            <SectionHeader title="Maintenance Requests" description="Requests for plot or grounds maintenance." onRefresh={() => fetchList("maintenance")} loading={loading.maintenance} />
+            <RequestGrid type="maintenance" rows={maintenance} loading={loading.maintenance} onCancel={handleCancel} />
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -205,57 +230,14 @@ export default function MyRequest({ open, onOpenChange }) {
   );
 }
 
-/* ---------- helpers for status + sorting + formatting ---------- */
 function normStatus(s) {
-  return String(s || "pending").toLowerCase();
+  const v = String(s || "pending").toLowerCase();
+  if (v === "canceled") return "cancelled";
+  return v;
 }
 
-function pickTimestamp(row) {
-  const candidates = [
-    row.created_at,
-    row.submitted_at,
-    row.request_date,
-    row.updated_at,
-    row.date,
-    row.created,
-  ];
-  for (const v of candidates) {
-    const t = v ? new Date(v).getTime() : NaN;
-    if (!Number.isNaN(t)) return t;
-  }
-  return 0;
-}
-
-function formatDate(v) {
-  if (!v) return "—";
-  const d = new Date(v);
-  return Number.isNaN(d.getTime())
-    ? String(v)
-    : d.toLocaleString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-}
-
-/* ---------- Subcomponents ---------- */
-
-function SectionHeader({ title, description, onRefresh, loading }) {
-  return (
-    <div className="mb-4 flex items-center justify-between p-3 rounded-lg bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200">
-      <div>
-        <h3 className="text-base font-semibold bg-gradient-to-r from-emerald-600 to-cyan-600 bg-clip-text text-transparent">{title}</h3>
-        <p className="text-sm text-slate-600">{description}</p>
-      </div>
-      <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading} className="shadow-md hover:shadow-lg transition-all">
-        {loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-        Refresh
-      </Button>
-    </div>
-  );
-}
+// keep your existing helpers and components below,
+// update disable checks to include both spellings
 
 function RequestGrid({ type, rows, loading, onCancel }) {
   if (loading) {
@@ -278,79 +260,29 @@ function RequestGrid({ type, rows, loading, onCancel }) {
     );
   }
 
-  // Sort: pending first, then others; newest first within each group
   const sorted = [...rows].sort((a, b) => {
     const sa = normStatus(a.status);
     const sb = normStatus(b.status);
     const ga = sa === "pending" ? 0 : 1;
     const gb = sb === "pending" ? 0 : 1;
     if (ga !== gb) return ga - gb;
-    return pickTimestamp(b) - pickTimestamp(a);
+    return (new Date(b.created_at || b.updated_at || 0)).getTime() - (new Date(a.created_at || a.updated_at || 0)).getTime();
   });
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {sorted.map((r) => {
         const id = r.id ?? r.request_id ?? r.reference_no ?? "-";
-        const deceased = r.deceased_name ?? r.deceased ?? r.name ?? "—";
         const status = normStatus(r.status);
 
-        // new lines for details
-        const createdAt = r.created_at ?? r.submitted_at ?? r.request_date ?? r.date ?? null;
-        const burialDate = r.burial_date ?? r.burialDate ?? null;
-
-        const nextStep =
-          status === "approved"
-            ? type === "burial"
-              ? "Next Step: Proceed to office and submit required documents."
-              : "Next Step: Proceed to office and submit payment."
-            : null;
-
         return (
-          <div key={`${type}-${id}`} className="relative group">
-            {/* backdrop shadow */}
-            <div className="absolute -inset-1 bg-gradient-to-br from-emerald-400/15 via-cyan-400/10 to-blue-400/15 rounded-xl blur-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-
-            <Card className="relative overflow-hidden border-emerald-100/50 bg-white/80 backdrop-blur hover:shadow-lg transition-all duration-300">
-              {/* subtle gradient overlay */}
-              <div className="absolute inset-0 bg-gradient-to-br from-emerald-400/5 to-cyan-400/5"></div>
-
-              <CardHeader className="relative pb-2">
-                <div className="flex items-start justify-between">
+          <Card key={`${type}-${id}`} className="relative overflow-hidden border-emerald-100/50 bg-white/80 backdrop-blur hover:shadow-lg transition-all duration-300">
+            <CardHeader className="relative pb-2">
+              <div className="flex items-start justify-between">
                 <div>
                   <CardTitle className="text-base text-slate-900 font-semibold">Request ID: {id}</CardTitle>
-
                   <CardDescription className="mt-1 space-y-1 text-slate-600">
-                    <div>
-                      Deceased Name:{" "}
-                      <span className="font-medium text-foreground">{deceased}</span>
-                    </div>
-
-                    {type === "burial" && (
-                      <>
-                        <div>
-                          Burial Date:{" "}
-                          <span className="font-medium text-foreground">
-                            {formatDate(burialDate)}
-                          </span>
-                        </div>
-                        <div>
-                          Requested on:{" "}
-                          <span className="font-medium text-foreground">
-                            {formatDate(createdAt)}
-                          </span>
-                        </div>
-                      </>
-                    )}
-
-                    {type === "maintenance" && (
-                      <div>
-                        Requested on:{" "}
-                        <span className="font-medium text-foreground">
-                          {formatDate(createdAt)}
-                        </span>
-                      </div>
-                    )}
+                    <div>Deceased Name: <span className="font-medium text-foreground">{r.deceased_name ?? "—"}</span></div>
                   </CardDescription>
                 </div>
                 <StatusBadge status={status} />
@@ -359,20 +291,6 @@ function RequestGrid({ type, rows, loading, onCancel }) {
 
             <CardContent className="relative space-y-3">
               <Separator className="bg-gradient-to-r from-transparent via-emerald-200 to-transparent" />
-              <div className="text-sm">
-                <div className="mb-1 font-medium text-slate-900">Status</div>
-                <div className="flex items-center gap-2 text-sm text-slate-700">
-                  {statusIcon(status)}
-                  <span className="capitalize font-medium">{status}</span>
-                </div>
-              </div>
-
-              {nextStep ? (
-                <div className="rounded-lg border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-3 text-sm text-amber-800 font-medium shadow-sm">
-                  {nextStep}
-                </div>
-              ) : null}
-
               <div className="flex justify-end">
                 <Button
                   variant="outline"
@@ -387,12 +305,13 @@ function RequestGrid({ type, rows, loading, onCancel }) {
               </div>
             </CardContent>
           </Card>
-          </div>
         );
       })}
     </div>
   );
 }
+
+
 
 function SkeletonCard() {
   return (

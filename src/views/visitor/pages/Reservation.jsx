@@ -11,9 +11,6 @@ import {
   ClipboardList,
   ShieldAlert,
   RefreshCcw,
-  UploadCloud,
-  FileImage,
-  FileText,
   ArrowRight,
   ArrowLeft,
   Sparkles,
@@ -106,10 +103,7 @@ const ENDPOINTS = {
   myReservations: `${API_BASE}/visitor/my-reservations`,
   cancelReservation: (id) =>
     `${API_BASE}/visitor/cancel-reservation/${encodeURIComponent(id)}`,
-  uploadReceipt: (id) =>
-    `${API_BASE}/visitor/reservations/${encodeURIComponent(
-      id
-    )}/upload-receipt`,
+
 };
 
 function formatPrice(v) {
@@ -234,7 +228,7 @@ function Stepper({ step }) {
     { n: 1, label: "Enter details", icon: Info, hint: "Visitor & deceased info" },
     { n: 2, label: "Pick on map", icon: MapPin, hint: "Select an available plot" },
     { n: 3, label: "Confirm & submit", icon: ClipboardList, hint: "Review then submit" },
-    { n: 4, label: "Upload receipt", icon: UploadCloud, hint: "Upload proof & wait" },
+ { n: 4, label: "Wait approval", icon: CheckCircle2, hint: "Admin reviews your request" },
   ];
 
   const pct =
@@ -346,10 +340,10 @@ function StatPill({ label, value, dotClass }) {
   );
 }
 
-function StatusTimeline({ status, hasReceipt }) {
+function StatusTimeline({ status}) {
   const s = String(status || "").toLowerCase();
   const submittedDone = !!status;
-  const receiptDone = !!hasReceipt;
+
   const approvedDone = s === "approved";
 
   const items = [
@@ -359,12 +353,7 @@ function StatusTimeline({ status, hasReceipt }) {
       done: submittedDone,
       icon: ClipboardList,
     },
-    {
-      title: "Receipt uploaded",
-      desc: "Payment proof submitted for review",
-      done: receiptDone,
-      icon: UploadCloud,
-    },
+ 
     {
       title: "Approved",
       desc: "Admin approved your request",
@@ -524,9 +513,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
   // reservation created
   const [activeReservation, setActiveReservation] = useState(null);
 
-  // receipt upload state
-  const [receiptFile, setReceiptFile] = useState(null);
-  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+
 
   // UI state
   const [q, setQ] = useState("");
@@ -548,9 +535,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
   // polling for approval
   const pollRef = useRef(null);
 
-  // upload dropzone
-  const fileInputRef = useRef(null);
-  const [dragging, setDragging] = useState(false);
+
 
   // computed applicant (visitor profile + overrides)
   const applicant = useMemo(() => {
@@ -643,11 +628,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
       if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
     };
   }, [applicantMeta, deceased, notes, onlyAvailable]);
-
-  const setReceiptFromFile = (f) => {
-    if (!f) return;
-    setReceiptFile(f);
-  };
 
   const normalizeGeoJson = (body) => {
     if (body?.type === "FeatureCollection") return body;
@@ -963,7 +943,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
 
     setSelectedPlot(row);
     setActiveReservation(null);
-    setReceiptFile(null);
+
 
     if (row.lat != null && row.lng != null) {
       setMapCenter({ lat: Number(row.lat), lng: Number(row.lng) });
@@ -984,7 +964,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
 
     setSelectedPlot(plot);
     setActiveReservation(null);
-    setReceiptFile(null);
+
 
     if (plot.lat != null && plot.lng != null) {
       setMapCenter({ lat: Number(plot.lat), lng: Number(plot.lng) });
@@ -1046,7 +1026,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
       setActiveReservation(reservation);
       setStep(4);
 
-      toast.success("Reservation submitted! Upload your receipt so the admin can approve.");
+    toast.success("Reservation submitted! Please wait for admin approval.");
       await fetchPlots();
       await fetchMyReservations();
     } catch (e) {
@@ -1073,7 +1053,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
         setSelectedPlot(null);
         setActiveReservation(null);
         setNotes("");
-        setReceiptFile(null);
+   
         setMapCenter(GOOGLE_CENTER);
         setMapZoom(19);
 
@@ -1124,64 +1104,9 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
   }, [activeReservation?.id, activeReservation?.status, refreshActiveReservationFromList, step]);
 
   /* ---------------- receipt upload ---------------- */
-  const receiptPreviewUrl = useMemo(() => {
-    if (!receiptFile) return null;
-    return URL.createObjectURL(receiptFile);
-  }, [receiptFile]);
 
-  useEffect(() => {
-    return () => {
-      if (receiptPreviewUrl) URL.revokeObjectURL(receiptPreviewUrl);
-    };
-  }, [receiptPreviewUrl]);
 
-  const canUploadReceipt = useMemo(() => {
-    const s = String(activeReservationStatus || "").toLowerCase();
-    return s === "pending";
-  }, [activeReservationStatus]);
 
-  const uploadReceipt = useCallback(async () => {
-    if (!isVisitorLoggedIn) return toast.error("Login required.");
-    if (!activeReservation?.id) return toast.error("No active reservation.");
-    if (!canUploadReceipt)
-      return toast.error("Receipt upload is allowed only while your reservation is pending.");
-    if (!receiptFile) return toast.error("Please choose a receipt file.");
-
-    const allowed = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
-    if (!allowed.includes(receiptFile.type)) {
-      toast.error("Only JPG, PNG, WEBP, or PDF is allowed.");
-      return;
-    }
-    const maxBytes = 8 * 1024 * 1024;
-    if (receiptFile.size > maxBytes) {
-      toast.error("File too large. Max 8MB.");
-      return;
-    }
-
-    setUploadingReceipt(true);
-    try {
-      const fd = new FormData();
-      fd.append("receipt", receiptFile);
-
-      const body = await fetchJson(ENDPOINTS.uploadReceipt(activeReservation.id), {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: fd,
-      });
-
-      const updated = body?.data || body;
-      setActiveReservation(updated);
-
-      toast.success("Receipt uploaded! Now wait for admin approval.");
-      await fetchMyReservations();
-
-      setReceiptFile(null);
-    } catch (e) {
-      toast.error(e?.message || "Failed to upload receipt.");
-    } finally {
-      setUploadingReceipt(false);
-    }
-  }, [activeReservation?.id, canUploadReceipt, fetchMyReservations, isVisitorLoggedIn, receiptFile, token]);
 
   const resetAll = () => {
     setStep(1);
@@ -1190,7 +1115,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
     setNotes("");
     setQ("");
     setOnlyAvailable(true);
-    setReceiptFile(null);
+
     setMapCenter(GOOGLE_CENTER);
     setMapZoom(19);
 
@@ -1255,12 +1180,8 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
   const selectedBadge = selectedPlot ? statusBadgeProps(selectedPlot.status) : null;
   const activeBadge = activeReservation ? statusBadgeProps(activeReservation.status) : null;
 
-  const existingReceiptUrl = useMemo(() => {
-    const u = activeReservation?.payment_receipt_url || activeReservation?.receipt_url || null;
-    return resolveAssetUrl(u);
-  }, [activeReservation?.payment_receipt_url, activeReservation?.receipt_url]);
+ 
 
-  const isPdf = (url) => (url ? url.toLowerCase().includes(".pdf") : false);
 
   const isPending = String(activeReservation?.status || "").toLowerCase() === "pending";
   const isApproved = String(activeReservation?.status || "").toLowerCase() === "approved";
@@ -1332,7 +1253,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                       <Sparkles className="h-5 w-5 text-emerald-700" />
                     </CardTitle>
                     <CardDescription className="text-slate-600">
-                      Visitor info → deceased details → pick plot → confirm → upload receipt → wait admin approval.
+                   Visitor info → deceased details → pick plot → confirm → wait admin approval.
                     </CardDescription>
                     <div className="mt-2 text-xs text-slate-500">
                       Draft:{" "}
@@ -1432,7 +1353,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                   Login required
                 </AlertTitle>
                 <AlertDescription className="text-rose-700">
-                  Please login as a visitor to reserve and upload receipts.
+                  Please login as a visitor to reserve
                 </AlertDescription>
               </Alert>
             </div>
@@ -2021,12 +1942,12 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
               <Card className="rounded-2xl overflow-hidden">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2">
-                    <UploadCloud className="h-5 w-5 text-emerald-700" />
-                    Step 4: Upload receipt & wait approval
+               <Loader2 className="h-5 w-5 text-emerald-700" />
+                   Step 4: Wait for admin approval
                   </CardTitle>
                   <CardDescription>
-                    Upload your receipt while status is <b>Pending</b>. Admin will review and approve after.
-                  </CardDescription>
+                   Admin will review your reservation. Auto-refresh runs every ~8 seconds while pending.
+                   </CardDescription>
                 </CardHeader>
 
                 <CardContent className="space-y-3">
@@ -2034,12 +1955,12 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                     <Alert className="rounded-2xl">
                       <AlertTitle>No active reservation</AlertTitle>
                       <AlertDescription>
-                        Submit a reservation first to upload payment and wait for approval.
+                        Submit a reservation first to wait for approval.
                       </AlertDescription>
                     </Alert>
                   ) : (
                     <>
-                      <StatusTimeline status={activeReservation?.status} hasReceipt={!!existingReceiptUrl} />
+                      <StatusTimeline status={activeReservation?.status} />
 
                       <div className="rounded-2xl border bg-white p-4">
                         <div className="flex items-start justify-between gap-2">
@@ -2096,26 +2017,16 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                           </Button>
                         </div>
 
-                        {isPending && !existingReceiptUrl ? (
-                          <div className="mt-3 rounded-2xl border bg-amber-50 p-3 text-sm text-amber-900">
-                            <div className="flex items-center gap-2 font-semibold">
-                              <Info className="h-4 w-4" />
-                              Action needed: Upload your receipt
-                            </div>
-                            <div className="text-xs text-amber-800 mt-1">
-                              Your reservation is pending. Upload your payment receipt so the admin can review and approve.
-                            </div>
-                          </div>
-                        ) : null}
+                      
 
-                        {isPending && existingReceiptUrl ? (
+                   {isPending ? (
                           <div className="mt-3 rounded-2xl border bg-amber-50 p-3 text-sm text-amber-900">
                             <div className="flex items-center gap-2 font-semibold">
                               <Loader2 className="h-4 w-4 animate-spin" />
                               Waiting for Admin Approval
                             </div>
                             <div className="text-xs text-amber-800 mt-1">
-                              Receipt received. Auto-refresh runs every ~8 seconds while pending.
+                              Your reservation is pending. Please wait while the admin reviews your request.
                             </div>
                           </div>
                         ) : null}
@@ -2157,180 +2068,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                         ) : null}
                       </div>
 
-                      <div className="rounded-2xl border bg-white p-4">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                              <UploadCloud className="h-4 w-4 text-slate-700" />
-                              Payment Receipt
-                            </div>
-                            <div className="text-xs text-slate-500 mt-0.5">
-                              Upload JPG, PNG, WEBP, or PDF (max 8MB). Upload is enabled while status is <b>Pending</b>.
-                            </div>
-                          </div>
-
-                          <Badge
-                            className={
-                              canUploadReceipt
-                                ? "bg-emerald-600 hover:bg-emerald-600"
-                                : "bg-slate-500 hover:bg-slate-500"
-                            }
-                          >
-                            {canUploadReceipt ? "Enabled" : "Disabled"}
-                          </Badge>
-                        </div>
-
-                        {existingReceiptUrl ? (
-                          <div className="mt-3 rounded-2xl border bg-slate-50 p-3">
-                            <div className="text-xs text-slate-600 font-semibold mb-2">Uploaded receipt</div>
-
-                            {isPdf(existingReceiptUrl) ? (
-                              <a
-                                href={existingReceiptUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-2 text-sm text-blue-700 hover:underline"
-                              >
-                                <FileText className="h-4 w-4" />
-                                View PDF receipt
-                              </a>
-                            ) : (
-                              <a href={existingReceiptUrl} target="_blank" rel="noreferrer">
-                                <img
-                                  src={existingReceiptUrl}
-                                  alt="Payment receipt"
-                                  className="w-full max-h-[260px] object-contain rounded-xl border bg-white"
-                                />
-                              </a>
-                            )}
-
-                            {canUploadReceipt ? (
-                              <div className="mt-2 text-xs text-slate-500">
-                                Need to replace it? Select a new file below and upload again.
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-
-                        <div className="mt-3 space-y-2">
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => {
-                              if (!canUploadReceipt || uploadingReceipt) return;
-                              fileInputRef.current?.click();
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                if (!canUploadReceipt || uploadingReceipt) return;
-                                fileInputRef.current?.click();
-                              }
-                            }}
-                            onDragOver={(e) => {
-                              e.preventDefault();
-                              if (!canUploadReceipt || uploadingReceipt) return;
-                              setDragging(true);
-                            }}
-                            onDragLeave={() => setDragging(false)}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              setDragging(false);
-                              if (!canUploadReceipt || uploadingReceipt) return;
-                              const f = e.dataTransfer.files?.[0] || null;
-                              setReceiptFromFile(f);
-                            }}
-                            className={[
-                              "rounded-2xl border p-4 transition-all",
-                              "bg-white",
-                              canUploadReceipt ? "cursor-pointer hover:shadow-sm" : "opacity-60 cursor-not-allowed",
-                              dragging ? "ring-2 ring-emerald-200 border-emerald-300 bg-emerald-50/40" : "border-slate-200",
-                            ].join(" ")}
-                          >
-                            <div className="flex items-start gap-3">
-                              <div className="h-11 w-11 rounded-2xl border bg-slate-50 grid place-items-center">
-                                <UploadCloud className="h-5 w-5 text-slate-700" />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="text-sm font-semibold text-slate-900">
-                                  Drag and drop your receipt
-                                </div>
-                                <div className="text-xs text-slate-500">
-                                  or click to browse (JPG, PNG, WEBP, or PDF, max 8MB)
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <input
-                            ref={fileInputRef}
-                            type="file"
-                            className="hidden"
-                            accept="image/jpeg,image/png,image/webp,application/pdf"
-                            disabled={!canUploadReceipt || uploadingReceipt}
-                            onChange={(e) => setReceiptFromFile(e.target.files?.[0] || null)}
-                          />
-
-                          {receiptFile ? (
-                            <div className="rounded-2xl border bg-slate-50 p-3 text-sm">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2 font-semibold text-slate-800 min-w-0">
-                                  {receiptFile.type === "application/pdf" ? (
-                                    <FileText className="h-4 w-4 shrink-0" />
-                                  ) : (
-                                    <FileImage className="h-4 w-4 shrink-0" />
-                                  )}
-                                  <span className="truncate">{receiptFile.name}</span>
-                                </div>
-
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="rounded-xl"
-                                  onClick={() => setReceiptFile(null)}
-                                  disabled={uploadingReceipt}
-                                >
-                                  Remove
-                                </Button>
-                              </div>
-
-                              <div className="text-xs text-slate-500 mt-1">
-                                {(receiptFile.size / 1024 / 1024).toFixed(2)} MB
-                              </div>
-
-                              {receiptPreviewUrl && receiptFile.type !== "application/pdf" ? (
-                                <img
-                                  src={receiptPreviewUrl}
-                                  alt="Preview"
-                                  className="mt-2 w-full max-h-[260px] object-contain rounded-xl border bg-white"
-                                />
-                              ) : null}
-                            </div>
-                          ) : null}
-
-                          <Button
-                            className="w-full bg-emerald-600 hover:bg-emerald-700 rounded-xl"
-                            onClick={uploadReceipt}
-                            disabled={!canUploadReceipt || uploadingReceipt || !receiptFile}
-                          >
-                            {uploadingReceipt ? (
-                              <span className="flex items-center justify-center gap-2">
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                Uploading…
-                              </span>
-                            ) : (
-                              "Upload Receipt"
-                            )}
-                          </Button>
-
-                          {!canUploadReceipt ? (
-                            <p className="text-xs text-slate-500">
-                              Receipt upload is disabled once the reservation is not pending (e.g., approved/rejected/cancelled).
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <Button variant="outline" onClick={resetAll} className="rounded-xl">
@@ -2367,7 +2104,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                     ? "Select an available plot on the map, then continue."
                     : step === 3
                     ? "Review and submit your reservation."
-                    : "Upload receipt while pending and wait for approval."}
+               : "Wait for admin approval."}
                 </CardDescription>
               </CardHeader>
 
