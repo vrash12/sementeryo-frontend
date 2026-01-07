@@ -18,7 +18,6 @@ import {
   Copy,
   Bell,
   CheckCircle2,
-  XCircle as RejectIcon,
 
   // ✅ Burial icons
   Skull,
@@ -64,6 +63,10 @@ import CemeteryMap, {
 import { Toaster, toast } from "sonner";
 
 const CemeteryMapMemo = memo(CemeteryMap);
+
+// If your lucide build rejects duplicate imports, we avoid importing XCircle twice.
+// Use RejectIcon as an alias in code:
+const RejectIcon = XCircle;
 
 const API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) ||
@@ -582,9 +585,7 @@ const ReservationsPanel = memo(function ReservationsPanel({
                             disabled={!canCancel}
                             onClick={async () => {
                               if (!canCancel) return;
-                              if (
-                                !window.confirm("Cancel this reservation?")
-                              )
+                              if (!window.confirm("Cancel this reservation?"))
                                 return;
                               await onCancel?.(r.id);
                             }}
@@ -2202,10 +2203,7 @@ export default function BurialPlots() {
                 />
               </div>
 
-              <div className="flex items-center gap-2 pt-6">
-                <Switch checked={onlyAvailable} onCheckedChange={setOnlyAvailable} />
-                <span className="text-sm">Only Available</span>
-              </div>
+             
             </div>
           </div>
         </CardContent>

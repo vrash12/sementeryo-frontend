@@ -1,5 +1,5 @@
 // frontend/src/views/admin/pages/BurialSchedule.jsx
-import { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -39,6 +39,8 @@ import {
   CheckCircle2,
   Clock3,
   MapPin,
+  Bug,
+  XCircle,
 } from "lucide-react";
 
 import { Toaster, toast } from "sonner";
@@ -47,8 +49,93 @@ import CemeteryMap, {
   CEMETERY_CENTER,
 } from "../../../components/map/CemeteryMap.jsx";
 
-// ✅ Reuse existing dialog component (same one used by visitor)
 import ReservationDialog from "../../../views/visitor/components/ReservationDialog";
+
+/* =========================================================================================
+  ✅ LOCAL Skeleton (so you don't need components/ui/skeleton)
+========================================================================================= */
+function Skeleton({ className = "" }) {
+  return (
+    <div className={`animate-pulse rounded-md bg-slate-100 ${className}`} />
+  );
+}
+
+/* =========================================================================================
+  ✅ Error Boundary (shows crash instead of white screen)
+========================================================================================= */
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { err: null, info: null };
+  }
+  static getDerivedStateFromError(err) {
+    return { err };
+  }
+  componentDidCatch(err, info) {
+    console.error("[BurialSchedule] Render crash:", err, info);
+    this.setState({ err, info });
+  }
+  render() {
+    if (this.state.err) {
+      const msg =
+        this.state.err?.message ||
+        String(this.state.err) ||
+        "Unknown render error";
+      return (
+        <div className="p-6">
+          <div className="max-w-3xl mx-auto rounded-xl border bg-white p-5">
+            <div className="flex items-center gap-2 text-rose-700">
+              <XCircle className="h-5 w-5" />
+              <div className="font-semibold">This page crashed</div>
+            </div>
+
+            <div className="mt-3 text-sm text-slate-700">
+              <div className="font-medium">Error:</div>
+              <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-xs text-slate-800">
+                {msg}
+              </pre>
+
+              {this.state.err?.stack ? (
+                <>
+                  <div className="mt-3 font-medium">Stack:</div>
+                  <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-xs text-slate-800">
+                    {this.state.err.stack}
+                  </pre>
+                </>
+              ) : null}
+
+              {this.state.info?.componentStack ? (
+                <>
+                  <div className="mt-3 font-medium">Component stack:</div>
+                  <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-xs text-slate-800">
+                    {this.state.info.componentStack}
+                  </pre>
+                </>
+              ) : null}
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <Button
+                onClick={() => window.location.reload()}
+                className="bg-slate-900 text-white hover:bg-slate-800"
+              >
+                Reload page
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => this.setState({ err: null, info: null })}
+              >
+                Try again
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 const API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) ||
@@ -82,13 +169,6 @@ function useAuthUser() {
 }
 
 /* --------------------------- reservation helper --------------------------- */
-/**
- * Admin reservation API helper.
- * Adjust ADMIN_RESERVE_ENDPOINT if your backend uses a different route.
- *
- * - Tries:  POST /admin/reserve-plot
- * - Fallback: POST /visitor/reserve-plot (only works if your backend allows admin or role is visitor)
- */
 async function reservePlotAsAdmin(plotId, notes = "") {
   const token = getToken();
   if (!token) throw new Error("Unauthorized. Please login again.");
@@ -176,7 +256,6 @@ const statusBadgeClass = (raw) => {
   return "bg-slate-600";
 };
 
-// plot status badge helper (available / reserved / occupied)
 const plotStatusBadge = (s) => {
   const v = safeLower(s);
   if (v === "available") return "bg-emerald-600";
@@ -186,12 +265,6 @@ const plotStatusBadge = (s) => {
 };
 
 /* -------------------- GeoJSON ➜ CemeteryMap helpers -------------------- */
-/**
- * IMPORTANT:
- * - We intentionally DO NOT set strokeColor/fillColor in DEFAULT_PLOT_STYLE anymore.
- * - CemeteryMap applies status-based colors + legend.
- * - We only override colors when highlighted.
- */
 const DEFAULT_PLOT_STYLE = {
   strokeOpacity: 0.8,
   strokeWeight: 1.5,
@@ -301,39 +374,16 @@ function fcToMapShapes(fc, highlightedId) {
 
 /* -------------------------- burial requests helpers -------------------------- */
 function pickReqDate(r) {
-  return (
-    r?.scheduled_date ||
-    r?.burial_date ||
-    r?.service_date ||
-    r?.date ||
-    null
-  );
+  return r?.scheduled_date || r?.burial_date || r?.service_date || r?.date || null;
 }
-
 function pickReqTime(r) {
-  return (
-    r?.scheduled_time ||
-    r?.burial_time ||
-    r?.service_time ||
-    r?.time ||
-    null
-  );
+  return r?.scheduled_time || r?.burial_time || r?.service_time || r?.time || null;
 }
-
 function getReqPlotLabel(r) {
-  return (
-    r?.plot_code ||
-    r?.plot_name ||
-    r?.plot_uid ||
-    r?.plot_id ||
-    "—"
-  );
+  return r?.plot_code || r?.plot_name || r?.plot_uid || r?.plot_id || "—";
 }
 
-/**
- * Try common confirm endpoints without making you hunt routes.
- * Uses confirmBurialRequestAsAdmin(req.params.id) on backend.
- */
+/* confirm helper */
 async function confirmBurialRequest(id) {
   const token = getToken();
   if (!token) throw new Error("Unauthorized. Please login again.");
@@ -377,37 +427,77 @@ async function confirmBurialRequest(id) {
   throw lastErr || new Error("Confirm failed.");
 }
 
-/* -------------------------- page main -------------------------- */
+/* =========================================================================================
+   Page main
+========================================================================================= */
 export default function BurialSchedule() {
+  return (
+    <ErrorBoundary>
+      <BurialScheduleInner />
+    </ErrorBoundary>
+  );
+}
+
+function BurialScheduleInner() {
   const currentUser = useAuthUser();
 
-  // ✅ OPTION A: This page is now driven by burial_requests, not burial_schedules
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
 
-  // dropdown data
-  const [plots, setPlots] = useState([]); // [{id, plot_name}]
+  const [plots, setPlots] = useState([]);
   const [fc, setFc] = useState(null);
 
   const [hoveredRow, setHoveredRow] = useState(null);
 
-  // modals
   const [viewItem, setViewItem] = useState(null);
 
-  // ✅ plot click -> details modal -> reservation dialog
   const [selectedPlot, setSelectedPlot] = useState(null);
   const [openPlotDetails, setOpenPlotDetails] = useState(false);
   const [openReserve, setOpenReserve] = useState(false);
 
   const isAnyModalOpen = !!viewItem || openPlotDetails || openReserve;
 
+  const [apiError, setApiError] = useState(null);
+  const [runtimeErrors, setRuntimeErrors] = useState([]);
+  const [showDebug, setShowDebug] = useState(
+    (typeof import.meta !== "undefined" && import.meta.env?.DEV) || false
+  );
+
+  useEffect(() => {
+    const onError = (ev) => {
+      const msg =
+        ev?.error?.message ||
+        ev?.message ||
+        "Unknown window error (check console)";
+      setRuntimeErrors((prev) =>
+        [{ type: "error", msg, ts: Date.now() }, ...prev].slice(0, 10)
+      );
+    };
+    const onRej = (ev) => {
+      const reason = ev?.reason;
+      const msg =
+        reason?.message ||
+        (typeof reason === "string" ? reason : JSON.stringify(reason)) ||
+        "Unhandled rejection";
+      setRuntimeErrors((prev) =>
+        [{ type: "rejection", msg, ts: Date.now() }, ...prev].slice(0, 10)
+      );
+    };
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRej);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRej);
+    };
+  }, []);
+
   const fetchRequests = useCallback(async () => {
     setLoading(true);
+    setApiError(null);
     try {
-      // ✅ expected backend: getBurialRequestsAsAdmin
       const res = await fetch(`${API_BASE}/admin/burial-requests`, {
         headers: authHeaders({ Accept: "application/json" }),
       });
@@ -436,7 +526,9 @@ export default function BurialSchedule() {
       setRows(arr);
     } catch (e) {
       console.error("[burial-requests] fetch error:", e);
-      toast.error(e?.message || "Failed to load burial requests.");
+      const msg = e?.message || "Failed to load burial requests.";
+      setApiError(msg);
+      toast.error(msg);
       setRows([]);
     } finally {
       setLoading(false);
@@ -445,11 +537,24 @@ export default function BurialSchedule() {
 
   const fetchPlots = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/admin/plots/available`, {
+      // ✅ backend you shared supports /admin/plots?status=available
+      const res = await fetch(`${API_BASE}/admin/plots?status=available&limit=500`, {
         headers: authHeaders({ Accept: "application/json" }),
       });
-      const json = await res.json().catch(() => []);
-      setPlots(Array.isArray(json) ? json : []);
+
+      const ct = res.headers.get("content-type") || "";
+      const body = ct.includes("application/json")
+        ? await res.json().catch(() => ({}))
+        : await res.text();
+
+      const arr =
+        body?.data && Array.isArray(body.data)
+          ? body.data
+          : Array.isArray(body)
+          ? body
+          : [];
+
+      setPlots(arr);
     } catch (e) {
       console.error("[plots] fetch error:", e);
       setPlots([]);
@@ -458,11 +563,34 @@ export default function BurialSchedule() {
 
   const fetchPlotsGeo = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/plot/`, {
-        headers: authHeaders(),
-      });
-      const json = await res.json();
-      setFc(json || null);
+      const candidates = [
+        `${API_BASE}/plot`,
+        `${API_BASE}/plot/`,
+        `${API_BASE}/plots/geojson`,
+        `${API_BASE}/visitor/plots-geojson`,
+      ];
+
+      let lastErr = null;
+      for (const url of candidates) {
+        try {
+          const res = await fetch(url, {
+            headers: authHeaders({ Accept: "application/json" }),
+          });
+          if (!res.ok) {
+            lastErr = new Error(`GeoJSON endpoint failed: ${url} (HTTP ${res.status})`);
+            continue;
+          }
+          const json = await res.json().catch(() => null);
+          if (json) {
+            setFc(json);
+            return;
+          }
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+
+      throw lastErr || new Error("No GeoJSON endpoint returned data.");
     } catch (e) {
       console.error("[plot geojson] fetch error:", e);
       setFc(null);
@@ -475,7 +603,6 @@ export default function BurialSchedule() {
     fetchPlotsGeo();
   }, [fetchRequests, fetchPlots, fetchPlotsGeo]);
 
-  // ✅ Refresh list when the tab/window gains focus (helps after accepting elsewhere)
   useEffect(() => {
     const onFocus = () => fetchRequests();
     window.addEventListener("focus", onFocus);
@@ -495,7 +622,6 @@ export default function BurialSchedule() {
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-
     return rows.filter((r) => {
       const deceased = String(r?.deceased_name || "").toLowerCase();
       const family = String(
@@ -520,7 +646,6 @@ export default function BurialSchedule() {
     });
   }, [rows, q, statusFilter]);
 
-  // ✅ when plot polygon clicked on map
   const handlePlotClick = useCallback((poly) => {
     setSelectedPlot(poly);
     setOpenPlotDetails(true);
@@ -538,7 +663,6 @@ export default function BurialSchedule() {
 
   const canReserveSelectedPlot = selectedPlotStatus === "available";
 
-  // normalize plot object for ReservationDialog
   const reservationPlot = useMemo(() => {
     if (!selectedPlot) return null;
     return {
@@ -597,7 +721,7 @@ export default function BurialSchedule() {
             <div>
               <CardTitle className="text-2xl">Burial Requests</CardTitle>
               <CardDescription>
-                Option A, this screen shows burial_requests (including accepted ones).
+                This screen shows burial_requests (including accepted ones).
               </CardDescription>
             </div>
 
@@ -611,20 +735,76 @@ export default function BurialSchedule() {
                 <RefreshCcw className="h-4 w-4" />
                 Refresh
               </Button>
+
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => setShowDebug((s) => !s)}
+                title="Toggle debug panel"
+              >
+                <Bug className="h-4 w-4" />
+                Debug
+              </Button>
             </div>
           </div>
 
-          {/* mini stats */}
+          {apiError ? (
+            <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+              <div className="font-semibold">API Error</div>
+              <div className="mt-1">{apiError}</div>
+            </div>
+          ) : null}
+
           <div className="mt-3 grid gap-3 md:grid-cols-4">
             <MiniStat icon={CalendarDays} label="All" value={stats.all} />
             <MiniStat icon={Clock3} label="Pending" value={stats.pending} />
             <MiniStat icon={CheckCircle2} label="Confirmed" value={stats.confirmed} />
             <MiniStat icon={ShieldCheck} label="Completed" value={stats.completed} />
           </div>
+
+          {showDebug ? (
+            <div className="mt-3 rounded-xl border bg-white p-3 text-xs text-slate-700">
+              <div className="font-semibold mb-2">Debug Panel</div>
+              <div className="grid gap-1">
+                <div>
+                  <span className="text-slate-500">API_BASE:</span>{" "}
+                  <span className="font-mono">{API_BASE || "(empty = same origin)"}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">Rows:</span> {rows.length}{" "}
+                  <span className="text-slate-500">Filtered:</span> {filtered.length}
+                </div>
+                <div>
+                  <span className="text-slate-500">GeoJSON loaded:</span>{" "}
+                  {fc?.features ? `yes (${fc.features.length} features)` : "no"}
+                </div>
+                <div>
+                  <span className="text-slate-500">Available plots:</span>{" "}
+                  {plots.length}
+                </div>
+              </div>
+
+              {runtimeErrors.length ? (
+                <>
+                  <Separator className="my-2" />
+                  <div className="font-semibold mb-1">Runtime Errors</div>
+                  <div className="space-y-2">
+                    {runtimeErrors.map((e) => (
+                      <div key={e.ts} className="rounded-lg bg-slate-50 p-2">
+                        <div className="text-slate-500">
+                          {e.type} • {new Date(e.ts).toLocaleTimeString()}
+                        </div>
+                        <div className="font-mono whitespace-pre-wrap">{e.msg}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ) : null}
         </CardHeader>
 
         <CardContent>
-          {/* controls */}
           <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between mb-4">
             <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
               <div className="relative">
@@ -661,7 +841,6 @@ export default function BurialSchedule() {
 
           <Separator className="my-2" />
 
-          {/* table */}
           <div className="rounded-xl border bg-white">
             <div className="grid grid-cols-12 px-4 py-3 text-xs font-medium text-slate-500">
               <div className="col-span-3">Deceased Name</div>
@@ -693,7 +872,7 @@ export default function BurialSchedule() {
 
                   return (
                     <div
-                      key={r.id ?? r.uid ?? Math.random()}
+                      key={r.id ?? r.uid ?? `${r.deceased_name}-${Math.random()}`}
                       className="grid grid-cols-12 items-center px-4 py-3 text-sm hover:bg-slate-50"
                       onMouseEnter={() => setHoveredRow(r)}
                       onMouseLeave={() => setHoveredRow(null)}
@@ -765,12 +944,9 @@ export default function BurialSchedule() {
             </ScrollArea>
           </div>
 
-          {/* Map under table, hidden when any modal is open */}
           <div className="mt-4 rounded-xl overflow-hidden border bg-white">
             <div className="px-4 py-3">
-              <div className="text-sm font-medium text-slate-800">
-                Plot Map
-              </div>
+              <div className="text-sm font-medium text-slate-800">Plot Map</div>
               <div className="text-xs text-slate-500">
                 Click a plot to reserve as admin.
               </div>
@@ -778,23 +954,24 @@ export default function BurialSchedule() {
 
             {!isAnyModalOpen && (
               <div className="h-[50vh]">
-                <CemeteryMap
-                  center={CEMETERY_CENTER}
-                  zoom={19}
-                  clickable={true}
-                  showGeofence={true}
-                  enableDrawing={false}
-                  polygons={mapShapes.polygons}
-                  markers={mapShapes.markers}
-                  onEditPlot={handlePlotClick}
-                />
+                <ErrorBoundary>
+                  <CemeteryMap
+                    center={CEMETERY_CENTER}
+                    zoom={19}
+                    clickable={true}
+                    showGeofence={true}
+                    enableDrawing={false}
+                    polygons={mapShapes.polygons}
+                    markers={mapShapes.markers}
+                    onEditPlot={handlePlotClick}
+                  />
+                </ErrorBoundary>
               </div>
             )}
           </div>
         </CardContent>
       </Card>
 
-      {/* ✅ Plot details modal */}
       <PlotDetailsModal
         open={openPlotDetails}
         plot={selectedPlot}
@@ -813,7 +990,6 @@ export default function BurialSchedule() {
         }}
       />
 
-      {/* ✅ Reservation dialog (reused) */}
       <ReservationDialog
         open={openReserve}
         plot={reservationPlot}
@@ -833,7 +1009,6 @@ export default function BurialSchedule() {
         }}
       />
 
-      {/* View modal */}
       <ViewModal item={viewItem} onOpenChange={(o) => !o && setViewItem(null)} />
     </div>
   );
@@ -854,7 +1029,6 @@ function MiniStat({ icon: Icon, label, value }) {
   );
 }
 
-/* -------------------------- plot details modal -------------------------- */
 function PlotDetailsModal({ open, plot, canReserve, onClose, onReserve }) {
   const p = plot?.properties || {};
   const status = plot?.status ?? p.status ?? p.plot_status ?? "—";
@@ -921,7 +1095,6 @@ function PlotDetailsModal({ open, plot, canReserve, onClose, onReserve }) {
   );
 }
 
-/* -------------------------- view-only modal + helpers -------------------------- */
 function Field({ label, children }) {
   return (
     <div className="grid grid-cols-4 gap-3 items-start">
