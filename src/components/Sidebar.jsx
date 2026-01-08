@@ -1,6 +1,6 @@
 // frontend/src/layouts/Sidebar.jsx
 
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { getAuth } from "../utils/auth";
 import {
@@ -30,18 +30,21 @@ const W_FULL = 272;
 const cx = (...c) => c.filter(Boolean).join(" ");
 
 const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "/api";
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) ||
+  "/api";
 
 export default function Sidebar() {
-  const [open, setOpen] = useState(true); // ✅ NEW: true hide/show
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+
+  const [open, setOpen] = useState(true);
   const [q, setQ] = useState("");
 
   const [authObj, setAuthObj] = useState(() => getAuth());
   const user = authObj?.user || {};
   const role = user?.role || "visitor";
 
-  const { pathname } = useLocation();
-
+  // hide sidebar for visitors
   if (role === "visitor") return null;
 
   const fullName =
@@ -88,20 +91,22 @@ export default function Sidebar() {
 
   async function logout() {
     try {
-      const token = authObj?.token;
+      const token = authObj?.token || authObj?.accessToken;
       await fetch(`${API_BASE}/logout`, {
         method: "POST",
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       }).catch(() => {});
     } finally {
       localStorage.removeItem("auth");
-      window.location.href = "/visitor/login";
+      setAuthObj(null);
+
+      // ✅ IMPORTANT: do NOT hard reload, just navigate
+      navigate("/visitor/login", { replace: true });
     }
   }
 
   return (
     <>
-      {/* ✅ Floating button when sidebar is hidden */}
       {!open && (
         <Button
           variant="outline"
@@ -123,12 +128,10 @@ export default function Sidebar() {
         )}
         style={{ width: W_FULL }}
       >
-        {/* Header card */}
         <Card className="relative m-4 rounded-2xl border-emerald-100 bg-white/80 backdrop-blur shadow-[0_12px_30px_-12px_rgba(16,185,129,0.25)] overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-emerald-400/5 to-cyan-400/5 pointer-events-none" />
 
           <CardHeader className="relative flex flex-row items-center justify-between space-y-0 pb-2">
-            {/* Profile modal trigger */}
             <button
               type="button"
               onClick={() => setProfileOpen(true)}
@@ -156,7 +159,6 @@ export default function Sidebar() {
               </div>
             </button>
 
-            {/* ✅ Hide sidebar button (FULL HIDE) */}
             <Button
               variant="ghost"
               size="icon"
@@ -181,7 +183,6 @@ export default function Sidebar() {
           </CardContent>
         </Card>
 
-        {/* Scrollable nav */}
         <ScrollArea className="flex-1 px-3 pt-2">
           {filtered.map(({ to, label, icon: Icon }) => (
             <NavLink
@@ -222,7 +223,6 @@ export default function Sidebar() {
           <div className="h-6" />
         </ScrollArea>
 
-        {/* Footer logout */}
         <div className="m-4">
           <div className="relative group">
             <div className="absolute -inset-0.5 bg-gradient-to-r from-rose-500 to-red-500 rounded-2xl blur opacity-0 group-hover:opacity-50 transition duration-300" />
@@ -240,10 +240,8 @@ export default function Sidebar() {
         </div>
       </aside>
 
-      {/* ✅ spacer so main content doesn't slide under fixed sidebar */}
       <div aria-hidden style={{ width: open ? W_FULL : 0 }} />
 
-      {/* Profile modal mount */}
       <ProfileModal open={profileOpen} onOpenChange={setProfileOpen} />
     </>
   );

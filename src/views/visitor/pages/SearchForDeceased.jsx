@@ -1,4 +1,10 @@
 // frontend/src/views/visitor/pages/SearchForDeceased.jsx
+// ✅ Geofence removed from this page so you can test Live Location from home.
+// Notes:
+// - We no longer import/use isInsideGeofence here.
+// - GPS will always start + keep watching if permission is granted.
+// - Routing will fall back to cemetery entrance if you’re too far from the cemetery (to avoid routing/snap failures).
+
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { NavLink } from "react-router-dom";
 import fetchBurialRecords from "../js/get-burial-records";
@@ -12,7 +18,6 @@ import CemeteryMap, {
   CEMETERY_CENTER,
   CEMETERY_ENTRANCE,
   INITIAL_ROAD_SEGMENTS,
-  isInsideGeofence, // ✅ geofence gating
 } from "../../../components/map/CemeteryMap";
 
 // shadcn/ui
@@ -421,7 +426,7 @@ function meanCenter(points) {
   return { lat: sLat / points.length, lng: sLng / points.length };
 }
 
-// --------------------------- Nearest CR helpers ---------------------------
+// --------------------------- Distance helpers ---------------------------
 function haversineDistanceM(a, b) {
   if (!a || !b) return Infinity;
   const R = 6371000;
@@ -443,6 +448,7 @@ function haversineDistanceM(a, b) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+// --------------------------- Nearest CR helpers ---------------------------
 function getNearestComfortRoom(userLoc, comfortRooms) {
   if (!userLoc || !Array.isArray(comfortRooms) || !comfortRooms.length)
     return null;
@@ -498,8 +504,16 @@ const TARGET_PIN_SVG = `
 
 // --------------------------- Amenities (static) ---------------------------
 const COMFORT_ROOMS = [
-  { id: "cr1", title: "Comfort Room 1", position: { lat: 15.495013, lng: 120.554517 } },
-  { id: "cr2", title: "Comfort Room 2", position: { lat: 15.494161, lng: 120.555232 } },
+  {
+    id: "cr1",
+    title: "Comfort Room 1",
+    position: { lat: 15.495013, lng: 120.554517 },
+  },
+  {
+    id: "cr2",
+    title: "Comfort Room 2",
+    position: { lat: 15.494161, lng: 120.555232 },
+  },
 ];
 
 const PARKING_LOT_PATH = [
@@ -598,7 +612,7 @@ export default function SearchForDeceased() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-const [isRequestingLoc, setIsRequestingLoc] = useState(false);
+  const [isRequestingLoc, setIsRequestingLoc] = useState(false);
 
   // ✅ plots/graves for map rendering
   const [plotsFc, setPlotsFc] = useState(null);
@@ -622,7 +636,7 @@ const [isRequestingLoc, setIsRequestingLoc] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
 
   // ✅ track where userLocation came from
-  // "gps" = real location inside geofence, "entrance" = fallback, "none" = not set yet
+  // "gps" = real location, "entrance" = fallback, "none" = not set yet
   const [locationSource, setLocationSource] = useState("none");
 
   const [graph, setGraph] = useState(null);
@@ -760,153 +774,155 @@ const [isRequestingLoc, setIsRequestingLoc] = useState(false);
     if (!userLocation && !locationConsent) setLocationModalOpen(true);
   }, [mapCoords, userLocation, locationConsent]);
 
+  // ✅ No geofence gating here — always attempt live location (if allowed)
+  const requestUserLocation = useCallback(() => {
+    setIsRequestingLoc(true);
+    setLocationConsent(true);
+    setLocationModalOpen(false);
 
-const requestUserLocation = useCallback(() => {
-  setIsRequestingLoc(true);            // ✅ start guard
-  setLocationConsent(true);
-  setLocationModalOpen(false);
+    hasGoodLocationRef.current = false;
+    setUserLocation(null);
+    setLocationSource("none");
+    setRouteStatus("Requesting your location…");
 
-  hasGoodLocationRef.current = false;
-  setUserLocation(null);
-  setLocationSource("none");
-  setRouteStatus("Requesting your location…");
+    if (!("geolocation" in navigator)) {
+      setUserLocation(DEFAULT_START);
+      setLocationSource("entrance");
+      setRouteStatus(
+        "Geolocation not supported. Starting from cemetery entrance."
+      );
+      setIsRequestingLoc(false);
+      return;
+    }
 
-  if (!("geolocation" in navigator)) {
-    setUserLocation(DEFAULT_START);
-    setLocationSource("entrance");
-    setRouteStatus("Geolocation not supported. Starting from cemetery entrance.");
-    setIsRequestingLoc(false);         // ✅ end guard
-    return;
-  }
+    if (!isSecureForDeviceAPIs()) {
+      setUserLocation(DEFAULT_START);
+      setLocationSource("entrance");
+      setRouteStatus(
+        "Location blocked by browser (needs HTTPS or localhost). Starting from cemetery entrance."
+      );
+      setIsRequestingLoc(false);
+      return;
+    }
 
-  if (!isSecureForDeviceAPIs()) {
-    setUserLocation(DEFAULT_START);
-    setLocationSource("entrance");
-    setRouteStatus(
-      "Location blocked by browser (needs HTTPS or localhost). Starting from cemetery entrance."
-    );
-    setIsRequestingLoc(false);         // ✅ end guard
-    return;
-  }
+    if (geoWatchIdRef.current) {
+      navigator.geolocation.clearWatch(geoWatchIdRef.current);
+      geoWatchIdRef.current = null;
+    }
 
-  if (geoWatchIdRef.current) {
-    navigator.geolocation.clearWatch(geoWatchIdRef.current);
-    geoWatchIdRef.current = null;
-  }
+    const startWatch = () => {
+      geoWatchIdRef.current = navigator.geolocation.watchPosition(
+        (position) => {
+          const { latitude, longitude, accuracy } = position.coords;
+          const loc = { lat: latitude, lng: longitude };
 
-  const startWatch = () => {
-    geoWatchIdRef.current = navigator.geolocation.watchPosition(
+          hasGoodLocationRef.current = true;
+          setUserLocation(loc);
+          setLocationSource("gps");
+          setRouteStatus(`Live location ✅ (±${Math.round(accuracy || 0)}m)`);
+        },
+        (err) => {
+          console.warn("watchPosition error:", err);
+          if (!hasGoodLocationRef.current) {
+            setUserLocation(DEFAULT_START);
+            setLocationSource("entrance");
+            setRouteStatus(
+              "Location updates failed. Starting from cemetery entrance."
+            );
+          } else {
+            setRouteStatus("Location updates stopped. Using last known location.");
+          }
+        },
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+      );
+    };
+
+    navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude, accuracy } = position.coords;
         const loc = { lat: latitude, lng: longitude };
 
-        const inside = isInsideGeofence(loc.lat, loc.lng);
-        if (!inside) {
-          if (geoWatchIdRef.current) {
-            navigator.geolocation.clearWatch(geoWatchIdRef.current);
-            geoWatchIdRef.current = null;
-          }
-          setRouteStatus(
-            "You left the cemetery boundary. Live GPS updates stopped. Using last known location."
-          );
-          return;
-        }
-
         hasGoodLocationRef.current = true;
         setUserLocation(loc);
         setLocationSource("gps");
-        setRouteStatus(`Live location ✅ (±${Math.round(accuracy || 0)}m)`);
+        setRouteStatus(`Location acquired ✅ (±${Math.round(accuracy || 0)}m)`);
+
+        startWatch();
+        setIsRequestingLoc(false);
       },
       (err) => {
-        console.warn("watchPosition error:", err);
-        if (!hasGoodLocationRef.current) {
-          setUserLocation(DEFAULT_START);
-          setLocationSource("entrance");
-          setRouteStatus("Location updates failed. Starting from cemetery entrance.");
-        } else {
-          setRouteStatus("Location updates stopped. Using last known location.");
-        }
-      },
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
-    );
-  };
+        console.warn("Geolocation error:", err);
 
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      const { latitude, longitude, accuracy } = position.coords;
-      const loc = { lat: latitude, lng: longitude };
+        const code = err?.code;
+        const msg =
+          code === 1
+            ? "Location permission denied."
+            : code === 2
+            ? "Location unavailable. Turn on GPS / Location Services and try again."
+            : code === 3
+            ? "Location timed out. Try again (better signal) or use the entrance."
+            : "Could not get your location.";
 
-      const inside = isInsideGeofence(loc.lat, loc.lng);
-
-      if (!inside) {
         setUserLocation(DEFAULT_START);
         setLocationSource("entrance");
-        setRouteStatus(
-          "You are outside the cemetery boundary. Live GPS is only available inside. Starting from cemetery entrance."
-        );
-        setIsRequestingLoc(false);     // ✅ end guard
-        return;
-      }
+        setRouteStatus(`${msg} Starting from cemetery entrance.`);
+        setIsRequestingLoc(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  }, [DEFAULT_START]);
 
-      hasGoodLocationRef.current = true;
-      setUserLocation(loc);
-      setLocationSource("gps");
-      setRouteStatus(`Location acquired ✅ (±${Math.round(accuracy || 0)}m)`);
+  const useDefaultLocation = useCallback(() => {
+    setIsRequestingLoc(false);
+    setLocationConsent(true);
+    setLocationModalOpen(false);
+    setUserLocation(DEFAULT_START);
+    setLocationSource("entrance");
+    if (!routeStatus) setRouteStatus("Starting route from cemetery entrance.");
+  }, [DEFAULT_START, routeStatus]);
 
-      startWatch();
-      setIsRequestingLoc(false);       // ✅ end guard
-    },
-    (err) => {
-      console.warn("Geolocation error:", err);
+  // ✅ Routing start logic WITHOUT geofence:
+  // If you're too far from the cemetery, route from entrance (but GPS can still be acquired).
+  const routingStart = useMemo(() => {
+    if (!userLocation) return null;
 
-      const code = err?.code;
-      const msg =
-        code === 1
-          ? "Location permission denied."
-          : code === 2
-          ? "Location unavailable. Turn on GPS / Location Services and try again."
-          : code === 3
-          ? "Location timed out. Try again (better signal) or use the entrance."
-          : "Could not get your location.";
+    if (locationSource !== "gps") return DEFAULT_START;
 
-      setUserLocation(DEFAULT_START);
-      setLocationSource("entrance");
-      setRouteStatus(`${msg} Starting from cemetery entrance.`);
-      setIsRequestingLoc(false);       // ✅ end guard
-    },
-    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-  );
-}, [DEFAULT_START]);
+    const dToCemetery = haversineDistanceM(userLocation, CEMETERY_CENTER);
 
-const useDefaultLocation = useCallback(() => {
-  setIsRequestingLoc(false);           // ✅ clear guard
-  setLocationConsent(true);
-  setLocationModalOpen(false);
-  setUserLocation(DEFAULT_START);
-  setLocationSource("entrance");
-  if (!routeStatus) setRouteStatus("Starting route from cemetery entrance.");
-}, [DEFAULT_START, routeStatus]);
+    // If user is very far, snapping to cemetery roads will fail. Use entrance as start.
+    // Adjust threshold if you want (e.g. 1000m).
+    const THRESHOLD_M = 700;
+    if (dToCemetery > THRESHOLD_M) return DEFAULT_START;
 
+    return userLocation;
+  }, [userLocation, locationSource, DEFAULT_START]);
 
-
-
-
+  const routingSource = useMemo(() => {
+    if (!routingStart) return "none";
+    if (routingStart === DEFAULT_START) return "entrance";
+    return "gps";
+  }, [routingStart, DEFAULT_START]);
 
   // -------------------------- Compute / update route ------------------------
   useEffect(() => {
     let cancelled = false;
 
-    if (!mapCoords || !userLocation || !graph) return;
+    if (!mapCoords || !routingStart || !graph) return;
 
     (async () => {
       try {
-        setRouteStatus("Computing route along cemetery roads…");
+        setRouteStatus(
+          routingSource === "entrance" && locationSource === "gps"
+            ? "You’re far from the cemetery. Routing starts from the cemetery entrance (GPS still active)."
+            : "Computing route along cemetery roads…"
+        );
         setRouteDistance(0);
         setRoutePath([]);
         setRouteSteps([]);
 
         const { polyline, distance, steps, debug } = await buildRoutedPolyline(
-          userLocation,
+          routingStart,
           mapCoords,
           graph,
           {
@@ -939,7 +955,7 @@ const useDefaultLocation = useCallback(() => {
     return () => {
       cancelled = true;
     };
-  }, [mapCoords, userLocation, graph]);
+  }, [mapCoords, routingStart, graph, routingSource, locationSource]);
 
   // ------------------------- Helpers: reset UI state ------------------------
   const resetAll = useCallback(() => {
@@ -1363,7 +1379,8 @@ const useDefaultLocation = useCallback(() => {
               </span>
             </CardTitle>
             <CardDescription className="text-slate-600">
-              Born {formatDate(row?.birth_date)} · Died {formatDate(row?.death_date)}
+              Born {formatDate(row?.birth_date)} · Died{" "}
+              {formatDate(row?.death_date)}
             </CardDescription>
           </CardHeader>
           <CardContent className="relative flex items-center justify-end gap-3">
@@ -1376,13 +1393,13 @@ const useDefaultLocation = useCallback(() => {
     );
   }
 
-  // --------------------------- Nearest CR (GPS + inside geofence only) -------------------
+  // --------------------------- Nearest CR (show only if near cemetery) -------------------
   const nearestCR = useMemo(() => {
     if (locationSource !== "gps") return null;
     if (!userLocation) return null;
 
-    const inside = isInsideGeofence(userLocation.lat, userLocation.lng);
-    if (!inside) return null;
+    const d = haversineDistanceM(userLocation, CEMETERY_CENTER);
+    if (d > 1200) return null; // hide if far away (home testing)
 
     return getNearestComfortRoom(userLocation, COMFORT_ROOMS);
   }, [userLocation, locationSource]);
@@ -1401,7 +1418,9 @@ const useDefaultLocation = useCallback(() => {
         id: cr.id,
         position: cr.position,
         title: isNearest ? `${cr.title} (Nearest)` : cr.title,
-        icon: svgToDataUrl(isNearest ? AMENITY_CR_NEAREST_PIN_SVG : AMENITY_CR_PIN_SVG),
+        icon: svgToDataUrl(
+          isNearest ? AMENITY_CR_NEAREST_PIN_SVG : AMENITY_CR_PIN_SVG
+        ),
         label: isNearest ? "Nearest CR" : undefined,
         zIndex: isNearest ? 80 : 50,
       });
@@ -1419,6 +1438,8 @@ const useDefaultLocation = useCallback(() => {
     }
 
     // Dynamic pins (route)
+    // NOTE: If you're far away, the map is restricted to cemetery bounds in CemeteryMap,
+    // so your home marker won't be visible. You can still verify Live Location via Status.
     if (userLocation) {
       list.push({
         id: "user",
@@ -1549,7 +1570,7 @@ const useDefaultLocation = useCallback(() => {
   }, [plotsFc, selectedPlotId]);
 
   const hasDetailsOpen = !!selected || !!scanResult;
-  const routeReady = routePath?.length > 0 && mapCoords && userLocation;
+  const routeReady = routePath?.length > 0 && mapCoords && routingStart;
 
   const photoSrc = resolvePhotoSrc(
     getPhotoUrlFromAnything(
@@ -1589,7 +1610,10 @@ const useDefaultLocation = useCallback(() => {
       const size = "900x900";
       const scale = 2;
 
-      const mUser = `color:0x0ea5e9|label:U|${userLocation.lat},${userLocation.lng}`;
+      // use routingStart for marker "U" if routing started at entrance fallback
+      const routeStartForImage = routingStart || userLocation || DEFAULT_START;
+
+      const mUser = `color:0x0ea5e9|label:U|${routeStartForImage.lat},${routeStartForImage.lng}`;
       const mTarget = `color:0xfb7185|label:T|${mapCoords.lat},${mapCoords.lng}`;
       const path = `weight:6|color:0x059669|enc:${enc}`;
 
@@ -1641,9 +1665,20 @@ const useDefaultLocation = useCallback(() => {
       setRouteStatus("Route image downloaded ✅");
     } catch (e) {
       console.error(e);
-      setRouteStatus("Image download failed. Please check API key & Static Maps API.");
+      setRouteStatus(
+        "Image download failed. Please check API key & Static Maps API."
+      );
     }
-  }, [routeReady, routePath, mapCoords, userLocation, deceasedNameResolved, GOOGLE_KEY]);
+  }, [
+    routeReady,
+    routePath,
+    mapCoords,
+    routingStart,
+    userLocation,
+    DEFAULT_START,
+    deceasedNameResolved,
+    GOOGLE_KEY,
+  ]);
 
   // UX controls
   const fitCemetery = useCallback(() => {
@@ -1659,14 +1694,14 @@ const useDefaultLocation = useCallback(() => {
     if (!g || !map) return;
 
     const bounds = new g.LatLngBounds();
-    if (userLocation) bounds.extend(userLocation);
+    if (routingStart) bounds.extend(routingStart);
     if (mapCoords) bounds.extend(mapCoords);
     if (Array.isArray(routePath)) routePath.forEach((p) => bounds.extend(p));
 
     try {
       map.fitBounds(bounds, 60);
     } catch {}
-  }, [userLocation, mapCoords, routePath]);
+  }, [routingStart, mapCoords, routePath]);
 
   const centerToYou = useCallback(() => {
     const map = mapRef.current;
@@ -1720,7 +1755,9 @@ const useDefaultLocation = useCallback(() => {
 
                   <div className="w-full rounded-3xl border bg-white/80 px-6 py-5 shadow-sm">
                     <div className="flex items-start gap-3">
-                      <span className="text-3xl sm:text-4xl leading-none text-slate-700">❝</span>
+                      <span className="text-3xl sm:text-4xl leading-none text-slate-700">
+                        ❝
+                      </span>
 
                       <div className="flex-1">
                         <div className="text-lg sm:text-2xl md:text-3xl font-semibold italic text-slate-800 leading-snug">
@@ -1731,14 +1768,17 @@ const useDefaultLocation = useCallback(() => {
                         </div>
                       </div>
 
-                      <span className="text-3xl sm:text-4xl leading-none text-slate-700">❞</span>
+                      <span className="text-3xl sm:text-4xl leading-none text-slate-700">
+                        ❞
+                      </span>
                     </div>
                   </div>
 
                   <CardDescription className="text-slate-600 max-w-3xl">
                     The map below always shows{" "}
-                    <span className="font-semibold">all graves/plots</span>. Search by name or scan
-                    a QR to pin a specific grave and (optionally) compute a route.
+                    <span className="font-semibold">all graves/plots</span>.
+                    Search by name or scan a QR to pin a specific grave and
+                    (optionally) compute a route.
                   </CardDescription>
                 </div>
 
@@ -1782,7 +1822,10 @@ const useDefaultLocation = useCallback(() => {
                     className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-4"
                   >
                     <div className="sm:col-span-2 lg:col-span-3">
-                      <label htmlFor="nameQuery" className="mb-1 block text-sm text-slate-600">
+                      <label
+                        htmlFor="nameQuery"
+                        className="mb-1 block text-sm text-slate-600"
+                      >
                         Deceased Name
                       </label>
                       <Input
@@ -1798,7 +1841,11 @@ const useDefaultLocation = useCallback(() => {
                     </div>
 
                     <div className="sm:col-span-1 lg:col-span-1 flex gap-2 items-end">
-                      <Button type="submit" disabled={searching} className="h-11 rounded-xl">
+                      <Button
+                        type="submit"
+                        disabled={searching}
+                        className="h-11 rounded-xl"
+                      >
                         {searching ? "Searching…" : "Search"}
                       </Button>
                       <Button
@@ -1817,10 +1864,12 @@ const useDefaultLocation = useCallback(() => {
                 ) : (
                   <div className="space-y-3">
                     <div className="rounded-2xl border bg-white/75 p-4">
-                      <div className="font-semibold text-slate-900">Scan a QR Code</div>
+                      <div className="font-semibold text-slate-900">
+                        Scan a QR Code
+                      </div>
                       <div className="text-sm text-slate-600 mt-1">
-                        Step 1: Scan or upload the QR. Step 2: Allow location (or use entrance).
-                        Step 3: View the grave pinned on the map.
+                        Step 1: Scan or upload the QR. Step 2: Allow location (or
+                        use entrance). Step 3: View the grave pinned on the map.
                       </div>
                     </div>
 
@@ -1845,13 +1894,16 @@ const useDefaultLocation = useCallback(() => {
                         onClick={(e) => {
                           e.currentTarget.value = "";
                         }}
-                        onChange={(e) => handleUploadFile(e.target.files?.[0] || null)}
+                        onChange={(e) =>
+                          handleUploadFile(e.target.files?.[0] || null)
+                        }
                       />
                     </div>
 
                     <div className="text-xs text-slate-500">
-                      QR should include <code>lat/lng</code> (or <code>latitude/longitude</code>) OR
-                      a valid <code>plot_id</code>.
+                      QR should include <code>lat/lng</code> (or{" "}
+                      <code>latitude/longitude</code>) OR a valid{" "}
+                      <code>plot_id</code>.
                     </div>
                   </div>
                 )}
@@ -1877,61 +1929,66 @@ const useDefaultLocation = useCallback(() => {
           )}
           {error && (
             <Card className="bg-white/80 backdrop-blur shadow-md border-rose-200 rounded-2xl">
-              <CardContent className="p-6 text-center text-rose-600">{error}</CardContent>
+              <CardContent className="p-6 text-center text-rose-600">
+                {error}
+              </CardContent>
             </Card>
           )}
         </div>
       </section>
 
       {/* Results (only show in Search mode) */}
-      {mode === "name" && (results.length > 0 || suggestions.length > 0 || notFoundMsg) && (
-        <section className="pb-2">
-          <div className="mx-auto w-full max-w-7xl px-6 lg:px-8 space-y-4">
-            {notFoundMsg && (
-              <Card className="bg-white/80 backdrop-blur shadow-md border-amber-200 rounded-2xl">
-                <CardContent className="p-6 text-center text-slate-700">
-                  <div className="text-lg">No match found</div>
-                  <div className="mt-1 text-sm text-slate-600">{notFoundMsg}</div>
-                </CardContent>
-              </Card>
-            )}
+      {mode === "name" &&
+        (results.length > 0 || suggestions.length > 0 || notFoundMsg) && (
+          <section className="pb-2">
+            <div className="mx-auto w-full max-w-7xl px-6 lg:px-8 space-y-4">
+              {notFoundMsg && (
+                <Card className="bg-white/80 backdrop-blur shadow-md border-amber-200 rounded-2xl">
+                  <CardContent className="p-6 text-center text-slate-700">
+                    <div className="text-lg">No match found</div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      {notFoundMsg}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
-            {results.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-sm font-medium text-slate-700">
-                  Best matches ({results.length})
+              {results.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-slate-700">
+                    Best matches ({results.length})
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {results.map((r) => (
+                      <RecordCard
+                        key={`res-${r.id ?? `${r.plot_id}-${getSearchName(r)}`}`}
+                        row={r}
+                        onPick={handleSelect}
+                      />
+                    ))}
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {results.map((r) => (
-                    <RecordCard
-                      key={`res-${r.id ?? `${r.plot_id}-${getSearchName(r)}`}`}
-                      row={r}
-                      onPick={handleSelect}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+              )}
 
-            {suggestions.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-sm font-medium text-slate-700">
-                  Other possible matches ({suggestions.length})
+              {suggestions.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-slate-700">
+                    Other possible matches ({suggestions.length})
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {suggestions.map((r) => (
+                      <RecordCard
+                        key={`sug-${r.id ?? `${r.plot_id}-${getSearchName(r)}`}`}
+                        row={r}
+                        onPick={handleSelect}
+                      />
+                    ))}
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {suggestions.map((r) => (
-                    <RecordCard
-                      key={`sug-${r.id ?? `${r.plot_id}-${getSearchName(r)}`}`}
-                      row={r}
-                      onPick={handleSelect}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
+              )}
+            </div>
+          </section>
+        )}
 
       {/* ALWAYS SHOW MAP + details panel */}
       <section className="pb-10">
@@ -1955,14 +2012,20 @@ const useDefaultLocation = useCallback(() => {
                 <CardDescription className="flex flex-wrap items-center gap-2">
                   {routeDistance > 0 && (
                     <span className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs text-slate-700 shadow-sm">
-                      Distance: <span className="font-semibold">{fmtDistance(routeDistance)}</span>
+                      Distance:{" "}
+                      <span className="font-semibold">
+                        {fmtDistance(routeDistance)}
+                      </span>
                     </span>
                   )}
 
                   {nearestCR?.room && (
                     <span className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs text-slate-700 shadow-sm">
-                      Nearest CR: <span className="font-semibold">{nearestCR.room.title}</span>
-                      <span className="text-slate-500">({Math.round(nearestCR.distanceM)}m)</span>
+                      Nearest CR:{" "}
+                      <span className="font-semibold">{nearestCR.room.title}</span>
+                      <span className="text-slate-500">
+                        ({Math.round(nearestCR.distanceM)}m)
+                      </span>
                     </span>
                   )}
                 </CardDescription>
@@ -2030,14 +2093,11 @@ const useDefaultLocation = useCallback(() => {
                     clickable={false}
                     showLegend={false}
                     showGeofence={false}
-                    // ✅ hide yellow road overlay
                     showInitialRoads={false}
-                    // ✅ graves + amenities polygons
                     polygons={[...amenityPolygons, ...plotPolygons]}
                     center={mapCoords || CEMETERY_CENTER}
                     zoom={mapCoords ? 19 : 17}
                     markers={mapMarkers}
-                    // route line appears only after a selection + route ready
                     polylines={routeReady ? mapPolylines : []}
                     onMapLoad={handleMapLoad}
                   />
@@ -2047,10 +2107,11 @@ const useDefaultLocation = useCallback(() => {
                   <div className="rounded-2xl border bg-white/90 p-4 shadow-sm">
                     <div className="font-semibold text-slate-800">Tip</div>
                     <div className="text-sm text-slate-600 mt-1">
-                      The map already shows <span className="font-semibold">all graves</span> plus{" "}
+                      The map already shows{" "}
+                      <span className="font-semibold">all graves</span> plus{" "}
                       <span className="font-semibold">comfort rooms</span> and{" "}
-                      <span className="font-semibold">parking</span>. Use Search or QR to pin a
-                      grave and generate directions.
+                      <span className="font-semibold">parking</span>. Use Search or QR to
+                      pin a grave and generate directions.
                     </div>
                   </div>
                 )}
@@ -2063,11 +2124,16 @@ const useDefaultLocation = useCallback(() => {
                       the grave uses the <span className="font-semibold">pink target pin</span>.
                       {locationSource === "gps" ? (
                         <span className="ml-2 text-emerald-700 text-xs font-medium">
-                          (Live GPS inside cemetery)
+                          (Live GPS enabled)
                         </span>
                       ) : (
                         <span className="ml-2 text-slate-500 text-xs font-medium">
                           (Starting from entrance)
+                        </span>
+                      )}
+                      {routingSource === "entrance" && locationSource === "gps" && (
+                        <span className="ml-2 text-amber-700 text-xs font-medium">
+                          (Routing uses entrance fallback)
                         </span>
                       )}
                     </div>
@@ -2094,7 +2160,8 @@ const useDefaultLocation = useCallback(() => {
                 <CardDescription className="text-slate-600">
                   {hasDetailsOpen ? (
                     <>
-                      Deceased: <span className="font-semibold">{deceasedNameResolved}</span>
+                      Deceased:{" "}
+                      <span className="font-semibold">{deceasedNameResolved}</span>
                       {scanResult?.matchedRow?.plot_id && (
                         <span className="ml-2 text-emerald-700 text-xs font-medium">
                           (matched by plot_id)
@@ -2271,23 +2338,23 @@ const useDefaultLocation = useCallback(() => {
         </DialogContent>
       </Dialog>
 
-<Dialog
-  open={locationModalOpen}
-  onOpenChange={(open) => {
-    if (!open) {
-      setLocationModalOpen(false);
+      {/* Location Modal */}
+      <Dialog
+        open={locationModalOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLocationModalOpen(false);
 
-      // ✅ only default to entrance if user did NOT click Allow
-      if (!locationConsent && !isRequestingLoc) {
-        useDefaultLocation();
-      }
-      return;
-    }
+            // ✅ only default to entrance if user did NOT click Allow
+            if (!locationConsent && !isRequestingLoc) {
+              useDefaultLocation();
+            }
+            return;
+          }
 
-    setLocationModalOpen(true);
-  }}
->
-
+          setLocationModalOpen(true);
+        }}
+      >
         <DialogContent
           className="sm:max-w-md rounded-2xl"
           onInteractOutside={(e) => e.preventDefault()}
@@ -2295,9 +2362,9 @@ const useDefaultLocation = useCallback(() => {
           <DialogHeader>
             <DialogTitle>Use Your Location?</DialogTitle>
             <DialogDescription>
-              If you allow location access, we’ll start the route from where you are.
-              If you are outside the cemetery boundary, live GPS will be disabled and we’ll start
-              from the cemetery entrance.
+              If you allow location access, we’ll try to start the route from where you are.
+              If you are far from the cemetery, routing may start from the cemetery entrance (but
+              your GPS can still be acquired).
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">

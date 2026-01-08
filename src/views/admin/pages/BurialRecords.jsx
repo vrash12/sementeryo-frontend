@@ -450,9 +450,7 @@ export default function BurialRecords() {
       <Card className="bg-white/80 backdrop-blur border-slate-200">
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Deceased list in plots</CardTitle>
-          <CardDescription>
-            Uses plots.person_full_name (and date_of_death if present).
-          </CardDescription>
+      
         </CardHeader>
 
         <CardContent>
@@ -463,7 +461,7 @@ export default function BurialRecords() {
             </div>
           ) : !filtered.length ? (
             <div className="text-sm text-slate-600">
-              No rows found. If you expect data, check that plots.person_full_name is filled and status is occupied.
+              No rows found. 
             </div>
           ) : (
             <div className="rounded-md border overflow-hidden">
