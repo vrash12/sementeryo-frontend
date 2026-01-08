@@ -2131,11 +2131,7 @@ export default function SearchForDeceased() {
                           (Starting from entrance)
                         </span>
                       )}
-                      {routingSource === "entrance" && locationSource === "gps" && (
-                        <span className="ml-2 text-amber-700 text-xs font-medium">
-                          (Routing uses entrance fallback)
-                        </span>
-                      )}
+               
                     </div>
 
                     {routeSteps?.length ? (
