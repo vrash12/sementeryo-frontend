@@ -1,34 +1,43 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+// frontend/src/components/MyRequest.jsx
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 
-import { RefreshCcw, Search, Loader2, XCircle, Info } from "lucide-react";
-
-// shadcn/ui
-import { Button } from "../../../components/ui/button";
-import { Input } from "../../../components/ui/input";
-import { Label } from "../../../components/ui/label";
-import { Badge } from "../../../components/ui/badge";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../../../components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../components/ui/table";
-import { Alert, AlertTitle, AlertDescription } from "../../../components/ui/alert";
+import { Button } from "./ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "./ui/card";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "../../../components/ui/dialog";
+} from "./ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { Badge } from "./ui/badge";
+import { Separator } from "./ui/separator";
+import { Alert, AlertDescription } from "./ui/alert";
+
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "../../../components/ui/select";
+  ClipboardList,
+  Wrench,
+  CheckCircle2,
+  Clock,
+  XCircle,
+  X,
+  RefreshCw,
+  CalendarDays,
+  MapPin,
+  Flag,
+  MessageSquareText,
+} from "lucide-react";
 
 const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "";
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) ||
+  "";
 
 /* --------------------------- auth helpers --------------------------- */
 function readAuth() {
@@ -41,21 +50,17 @@ function readAuth() {
     return null;
   }
 }
+
 function getToken(auth) {
   return auth?.accessToken || auth?.token || auth?.jwt || "";
 }
 
-/* --------------------------- small debounce hook --------------------------- */
-function useDebouncedValue(value, delay = 250) {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-  return debounced;
+function getUserId(auth) {
+  // backend expects visitor user id for :family_contact or requester
+  return auth?.user?.id ?? auth?.user?.user_id ?? null;
 }
 
-/* --------------------------- fetch helper (fallback endpoints) --------------------------- */
+/* --------------------------- fetch helper --------------------------- */
 async function fetchFirstOk(urls, options) {
   let lastErr = null;
 
@@ -69,21 +74,18 @@ async function fetchFirstOk(urls, options) {
 
       if (res.ok) return { res, body, url };
 
-      // allow fallback to other endpoints
-      if (res.status === 404) {
-        lastErr = new Error(
-          typeof body === "string"
-            ? body
-            : body?.message || body?.error || `404 ${url}`
-        );
-        continue;
-      }
-
-      const m =
+      const msg =
         typeof body === "string"
           ? body
           : body?.message || body?.error || `HTTP ${res.status}`;
-      throw new Error(m);
+
+      // if 404, try next candidate URL
+      if (res.status === 404) {
+        lastErr = new Error(msg);
+        continue;
+      }
+
+      throw new Error(msg);
     } catch (e) {
       lastErr = e;
     }
@@ -92,514 +94,537 @@ async function fetchFirstOk(urls, options) {
   throw lastErr || new Error("Request failed");
 }
 
-/* --------------------------- helpers --------------------------- */
-const safeLower = (v) => String(v || "").toLowerCase();
-const isTruthyStr = (v) => v != null && String(v).trim() !== "";
+/* --------------------------- endpoints --------------------------- */
+/**
+ * These are "candidate" paths because your backend evolved over time.
+ * The script will try each until it finds one that returns 200.
+ */
+const PATHS = {
+  burialList: (userId) => [
+    `/visitor/my-burial-requests/${encodeURIComponent(userId)}`,
+    `/visitor/burial-requests/${encodeURIComponent(userId)}`,
+  ],
+  maintenanceList: (userId) => [
+    `/visitor/my-maintenance-requests/${encodeURIComponent(userId)}`,
+    `/visitor/maintenance-requests/${encodeURIComponent(userId)}`,
+  ],
 
-function extractArray(body) {
-  if (Array.isArray(body)) return body;
-  if (Array.isArray(body?.data)) return body.data;
-  if (Array.isArray(body?.rows)) return body.rows;
-  if (Array.isArray(body?.records)) return body.records;
-  if (Array.isArray(body?.result)) return body.result;
-  if (Array.isArray(body?.data?.rows)) return body.data.rows;
-  if (Array.isArray(body?.data?.records)) return body.data.records;
-  return [];
+  cancelBurial: (reqId) => [
+    `/visitor/request-burial/cancel/${encodeURIComponent(reqId)}`,
+    `/visitor/burial-request/${encodeURIComponent(reqId)}/cancel`,
+    `/visitor/cancel-burial-request/${encodeURIComponent(reqId)}`,
+  ],
+  cancelMaintenance: (reqId) => [
+    `/visitor/request-maintenance/cancel/${encodeURIComponent(reqId)}`,
+    `/visitor/maintenance-request/${encodeURIComponent(reqId)}/cancel`,
+    `/visitor/cancel-maintenance-request/${encodeURIComponent(reqId)}`,
+  ],
+};
+
+function safeLower(v) {
+  return String(v || "").trim().toLowerCase();
 }
 
-function fmtDateTime(v) {
-  if (!v) return "—";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return String(v);
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function normStatus(s) {
+  const v = safeLower(s || "pending");
+  if (v === "canceled") return "cancelled";
+  return v;
 }
 
-function statusBadge(statusRaw) {
-  const s = safeLower(statusRaw);
-  if (s === "approved" || s === "completed")
-    return { label: statusRaw || "Approved", cls: "bg-emerald-600 hover:bg-emerald-600" };
-  if (s === "scheduled")
-    return { label: "Scheduled", cls: "bg-sky-600 hover:bg-sky-600" };
-  if (s === "pending")
-    return { label: "Pending", cls: "bg-amber-500 hover:bg-amber-500" };
-  if (s === "cancelled" || s === "canceled" || s === "rejected")
-    return { label: statusRaw || "Cancelled", cls: "bg-rose-600 hover:bg-rose-600" };
-  return { label: statusRaw || "—", cls: "bg-slate-600 hover:bg-slate-600" };
+function fmtDateShort(s) {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return String(s);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function typeBadge(kind) {
-  const k = safeLower(kind);
-  if (k === "reservation") return { label: "Reservation", cls: "bg-indigo-600 hover:bg-indigo-600" };
-  if (k === "inquiry" || k === "inquire") return { label: "Inquiry", cls: "bg-fuchsia-600 hover:bg-fuchsia-600" };
-  if (k === "maintenance") return { label: "Maintenance", cls: "bg-teal-600 hover:bg-teal-600" };
-  if (k === "burial") return { label: "Burial", cls: "bg-emerald-700 hover:bg-emerald-700" };
-  return { label: kind || "—", cls: "bg-slate-500 hover:bg-slate-500" };
+function fmtTime(t) {
+  if (!t) return "—";
+  return String(t);
 }
 
-function getPlotId(r) {
-  return (
-    r?.plot_id ??
-    r?.plotId ??
-    r?.grave_plot_id ??
-    r?.plot?.id ??
-    r?.plot ??
-    null
-  );
+// Burial request date/time fields can vary in your DB
+function pickBurialDate(r) {
+  return r?.scheduled_date || r?.burial_date || r?.service_date || r?.date || null;
+}
+function pickBurialTime(r) {
+  return r?.scheduled_time || r?.burial_time || r?.service_time || r?.time || null;
+}
+function pickPlotLabel(r) {
+  return r?.plot_code || r?.plot_name || r?.plot_uid || r?.plot_id || "—";
 }
 
-function getCreatedAt(r) {
-  return (
-    r?.created_at ??
-    r?.createdAt ??
-    r?.requested_at ??
-    r?.requestedAt ??
-    r?.date_created ??
-    r?.updated_at ??
-    r?.updatedAt ??
-    null
-  );
-}
-
-function getStatus(r) {
-  return r?.status ?? r?.state ?? r?.request_status ?? r?.approval_status ?? "pending";
-}
-
-function getDeceasedName(r) {
-  return (
-    r?.deceased_name ??
-    r?.person_full_name ??
-    r?.personFullName ??
-    r?.name ??
-    r?.full_name ??
-    null
-  );
-}
-
-function getSummary(kind, r) {
-  const k = safeLower(kind);
-  if (k === "maintenance") return r?.description || "Maintenance request";
-  if (k === "burial") return "Burial scheduling request";
-  if (k === "reservation") return r?.remarks || r?.notes || "Plot reservation request";
-  if (k === "inquiry" || k === "inquire") return r?.message || r?.remarks || "Inquiry";
-  return "Request";
-}
-
-export default function MyRequests() {
-  const navigate = useNavigate();
-
+/* ============================================================================
+   Component
+============================================================================ */
+export default function MyRequest({ open, onOpenChange }) {
   const auth = useMemo(() => readAuth(), []);
-  const currentUser = auth?.user || {};
-  const token = getToken(auth);
+  const token = useMemo(() => getToken(auth), [auth]);
+  const requestOwnerId = useMemo(() => getUserId(auth), [auth]);
 
-  const role = String(currentUser?.role || "").toLowerCase();
-  const isVisitorLoggedIn = !!token && role === "visitor" && !!currentUser?.id;
-
-  const headersAuth = useMemo(
-    () => (token ? { Authorization: `Bearer ${token}` } : {}),
+  const headers = useMemo(
+    () => ({
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    }),
     [token]
   );
 
-  // UI state
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
+  const [tab, setTab] = useState("burial");
+  const [burial, setBurial] = useState([]);
+  const [maintenance, setMaintenance] = useState([]);
+  const [loading, setLoading] = useState({ burial: false, maintenance: false });
+  const [msg, setMsg] = useState({ type: "", text: "" });
 
-  const [rows, setRows] = useState([]); // normalized combined list
-
-  // filters
-  const [qInput, setQInput] = useState("");
-  const q = useDebouncedValue(qInput, 200);
-
-  const [typeFilter, setTypeFilter] = useState("all"); // all | reservation | inquiry | maintenance | burial
-
-  // details dialog
-  const [open, setOpen] = useState(false);
-  const [activeRow, setActiveRow] = useState(null);
-
-  const loadAll = useCallback(async () => {
-    if (!isVisitorLoggedIn) return;
-
-    setLoading(true);
-    setErr("");
-
-    const uid = encodeURIComponent(String(currentUser.id));
-
-    // ✅ Your Inquire.jsx already uses these maintenance + burial endpoints,
-    // so we reuse the same patterns here.
-    const endpoints = {
-      maintenance: [
-        `${API_BASE}/visitor/my-maintenance-schedule/${uid}`,
-      ],
-      burial: [
-        `${API_BASE}/visitor/my-burial-requests/${uid}`,
-        `${API_BASE}/visitor/burial-requests/${uid}`,
-      ],
-
-      // ⚠️ These two depend on your backend routes.
-      // Add/adjust the endpoints to match your actual API.
-      reservation: [
-        `${API_BASE}/visitor/my-reservations/${uid}`,
-        `${API_BASE}/visitor/reservations/${uid}`,
-        `${API_BASE}/reservation/my/${uid}`,
-      ],
-      inquiry: [
-        `${API_BASE}/visitor/my-inquiries/${uid}`,
-        `${API_BASE}/visitor/inquiries/${uid}`,
-        `${API_BASE}/inquire/my/${uid}`,
-      ],
-    };
-
-    try {
-      const results = await Promise.allSettled(
-        Object.entries(endpoints).map(async ([kind, urls]) => {
-          const { body } = await fetchFirstOk(urls, { headers: headersAuth });
-          const list = extractArray(body);
-          return { kind, list: Array.isArray(list) ? list : [] };
-        })
-      );
-
-      const combined = [];
-
-      for (const r of results) {
-        if (r.status === "fulfilled") {
-          const { kind, list } = r.value;
-
-          list.forEach((item) => {
-            combined.push({
-              kind,
-              id: item?.id ?? item?.uid ?? item?.request_id ?? item?.reservation_id ?? null,
-              status: getStatus(item),
-              created_at: getCreatedAt(item),
-              plot_id: getPlotId(item),
-              deceased_name: getDeceasedName(item),
-              summary: getSummary(kind, item),
-              raw: item,
-            });
-          });
-        } else {
-          // If an API isn't implemented yet, it might 404 — don't hard-fail the page.
-          const msg = String(r.reason?.message || r.reason || "");
-          // keep as warning only
-          if (msg && !safeLower(msg).includes("404")) {
-            setErr((prev) => prev || msg);
-          }
-        }
+  const fetchList = useCallback(
+    async (which) => {
+      if (!requestOwnerId) {
+        setMsg({ type: "error", text: "Missing user id, please login again." });
+        return;
+      }
+      if (!token) {
+        setMsg({ type: "error", text: "Missing token, please login again." });
+        return;
       }
 
-      // newest first
-      combined.sort((a, b) => {
-        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return tb - ta;
-      });
+      const setList = which === "burial" ? setBurial : setMaintenance;
 
-      setRows(combined);
-    } catch (e) {
-      setRows([]);
-      setErr(String(e?.message || e));
-    } finally {
-      setLoading(false);
-    }
-  }, [API_BASE, headersAuth, isVisitorLoggedIn, currentUser.id]);
+      const urls =
+        which === "burial"
+          ? PATHS.burialList(requestOwnerId).map((p) => `${API_BASE}${p}`)
+          : PATHS.maintenanceList(requestOwnerId).map((p) => `${API_BASE}${p}`);
+
+      setLoading((l) => ({ ...l, [which]: true }));
+      setMsg({ type: "", text: "" });
+
+      try {
+        const { body } = await fetchFirstOk(urls, { headers });
+        const rows = Array.isArray(body?.data)
+          ? body.data
+          : Array.isArray(body)
+          ? body
+          : [];
+        setList(rows);
+      } catch (err) {
+        setMsg({
+          type: "error",
+          text: err?.message || "Unable to fetch requests.",
+        });
+        setList([]);
+      } finally {
+        setLoading((l) => ({ ...l, [which]: false }));
+      }
+    },
+    [requestOwnerId, token, headers]
+  );
 
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    if (!open) return;
+    fetchList("burial");
+    fetchList("maintenance");
+  }, [open, fetchList]);
 
-  const filtered = useMemo(() => {
-    const text = q.trim().toLowerCase();
+  async function handleCancel(which, id) {
+    setMsg({ type: "", text: "" });
 
-    return (rows || [])
-      .filter((r) => {
-        if (typeFilter === "all") return true;
-        return safeLower(r.kind) === safeLower(typeFilter);
-      })
-      .filter((r) => {
-        if (!text) return true;
-        const bag = [
-          r.kind,
-          r.id,
-          r.status,
-          r.plot_id,
-          r.deceased_name,
-          r.summary,
-          r.created_at,
-        ]
-          .filter((v) => v != null)
-          .map((v) => String(v).toLowerCase())
-          .join(" ");
-        return bag.includes(text);
+    const list = which === "burial" ? burial : maintenance;
+    const setList = which === "burial" ? setBurial : setMaintenance;
+    const original = [...list];
+
+    // optimistic UI
+    setList((rows) =>
+      rows.map((r) =>
+        String(r.id ?? r.request_id ?? r.reference_no) === String(id)
+          ? { ...r, status: "cancelled" }
+          : r
+      )
+    );
+
+    try {
+      const urls =
+        which === "burial"
+          ? PATHS.cancelBurial(id).map((p) => `${API_BASE}${p}`)
+          : PATHS.cancelMaintenance(id).map((p) => `${API_BASE}${p}`);
+
+      // try PATCH first (common), fallback to POST if backend differs
+      try {
+        await fetchFirstOk(urls, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ reason: "user-cancelled" }),
+        });
+      } catch (e) {
+        await fetchFirstOk(urls, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ reason: "user-cancelled" }),
+        });
+      }
+
+      setMsg({ type: "ok", text: "Request cancelled." });
+
+      // refresh that list
+      await fetchList(which);
+
+      setTimeout(() => {
+        setMsg((m) => (m.type === "ok" ? { type: "", text: "" } : m));
+      }, 2500);
+    } catch (err) {
+      setList(original);
+      setMsg({
+        type: "error",
+        text: err?.message || "Unable to cancel the request.",
       });
-  }, [rows, q, typeFilter]);
+    }
+  }
 
-  const counts = useMemo(() => {
-    const c = { all: rows.length, reservation: 0, inquiry: 0, maintenance: 0, burial: 0 };
-    rows.forEach((r) => {
-      const k = safeLower(r.kind);
-      if (c[k] != null) c[k] += 1;
-    });
-    return c;
-  }, [rows]);
-
-  const openDetails = (row) => {
-    setActiveRow(row);
-    setOpen(true);
-  };
-
-  const goToSourcePage = (row) => {
-    const k = safeLower(row?.kind);
-    if (k === "reservation") return navigate("/visitor/reservation");
-    if (k === "maintenance") return navigate("/visitor/inquire?type=maintenance");
-    if (k === "burial") return navigate("/visitor/inquire?type=burial");
-    if (k === "inquiry" || k === "inquire") return navigate("/visitor/inquire");
-    return;
-  };
-
-  const displayName = `${currentUser.first_name || ""} ${currentUser.last_name || ""}`.trim();
+  const burialCount = burial?.length ?? 0;
+  const maintenanceCount = maintenance?.length ?? 0;
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">My Requests</h1>
-          <p className="text-sm text-muted-foreground">
-            Reservations, inquiries, maintenance requests, and burial scheduling requests—combined in one place.
-          </p>
-        </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-4xl bg-white/90 backdrop-blur border-white/60 shadow-2xl">
+        <DialogHeader>
+          <DialogTitle className="text-2xl bg-gradient-to-r from-emerald-600 via-cyan-600 to-blue-600 bg-clip-text text-transparent">
+            My Requests
+          </DialogTitle>
+          <DialogDescription className="text-slate-600">
+            Track your submitted requests and next steps.
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={loadAll} disabled={loading}>
-            <RefreshCcw className={["mr-2 h-4 w-4", loading ? "animate-spin" : ""].join(" ")} />
-            Refresh
-          </Button>
-        </div>
+        {msg.text ? (
+          <Alert
+            variant={msg.type === "error" ? "destructive" : "default"}
+            className={
+              msg.type === "error"
+                ? "mb-3 bg-rose-50/90 backdrop-blur border-rose-200 shadow-md"
+                : "mb-3 border-emerald-200 bg-emerald-50/90 backdrop-blur text-emerald-700 shadow-md"
+            }
+          >
+            <AlertDescription>{msg.text}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        <Tabs value={tab} onValueChange={setTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-2 bg-gradient-to-br from-emerald-50/80 to-cyan-50/80 backdrop-blur border border-emerald-100 shadow-md">
+            <TabsTrigger
+              value="burial"
+              className="gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-emerald-500 data-[state=active]:to-cyan-500 data-[state=active]:text-white data-[state=active]:shadow-md transition-all"
+            >
+              <ClipboardList className="h-4 w-4" />
+              Burial Requests
+              <Badge variant="secondary" className="ml-1">
+                {burialCount}
+              </Badge>
+            </TabsTrigger>
+
+            <TabsTrigger
+              value="maintenance"
+              className="gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-cyan-500 data-[state=active]:to-blue-500 data-[state=active]:text-white data-[state=active]:shadow-md transition-all"
+            >
+              <Wrench className="h-4 w-4" />
+              Maintenance Requests
+              <Badge variant="secondary" className="ml-1">
+                {maintenanceCount}
+              </Badge>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="burial" className="mt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-slate-600">
+                Showing your burial requests.
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => fetchList("burial")}
+                disabled={loading.burial}
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh
+              </Button>
+            </div>
+
+            <RequestGrid
+              type="burial"
+              rows={burial}
+              loading={loading.burial}
+              onCancel={handleCancel}
+            />
+          </TabsContent>
+
+          <TabsContent value="maintenance" className="mt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-slate-600">
+                Showing your maintenance requests.
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => fetchList("maintenance")}
+                disabled={loading.maintenance}
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh
+              </Button>
+            </div>
+
+            <RequestGrid
+              type="maintenance"
+              rows={maintenance}
+              loading={loading.maintenance}
+              onCancel={handleCancel}
+            />
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ============================================================================
+   UI Pieces
+============================================================================ */
+function SkeletonCard() {
+  return (
+    <Card className="bg-gradient-to-br from-slate-50 to-slate-100 border-slate-200">
+      <CardHeader className="pb-2">
+        <div className="h-4 w-40 animate-pulse rounded bg-gradient-to-r from-emerald-200 to-cyan-200" />
+        <div className="mt-2 h-3 w-28 animate-pulse rounded bg-gradient-to-r from-slate-200 to-slate-300" />
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="h-3 w-24 animate-pulse rounded bg-gradient-to-r from-slate-200 to-slate-300" />
+        <div className="h-10 w-full animate-pulse rounded bg-gradient-to-r from-slate-200 to-slate-300" />
+        <div className="ml-auto h-8 w-24 animate-pulse rounded bg-gradient-to-r from-slate-200 to-slate-300" />
+      </CardContent>
+    </Card>
+  );
+}
+
+function StatusBadge({ status }) {
+  switch (status) {
+    case "approved":
+    case "confirmed":
+      return (
+        <Badge className="bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md">
+          Approved
+        </Badge>
+      );
+    case "pending":
+      return (
+        <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md">
+          Pending
+        </Badge>
+      );
+    case "rejected":
+      return (
+        <Badge className="bg-gradient-to-r from-rose-500 to-red-500 text-white shadow-md">
+          Rejected
+        </Badge>
+      );
+    case "cancelled":
+      return (
+        <Badge className="bg-gradient-to-r from-slate-500 to-gray-500 text-white shadow-md">
+          Cancelled
+        </Badge>
+      );
+    case "completed":
+      return (
+        <Badge className="bg-gradient-to-r from-indigo-500 to-blue-500 text-white shadow-md">
+          Completed
+        </Badge>
+      );
+    default:
+      return (
+        <Badge variant="secondary" className="capitalize shadow-sm">
+          {status || "unknown"}
+        </Badge>
+      );
+  }
+}
+
+function statusIcon(status) {
+  switch (status) {
+    case "approved":
+    case "confirmed":
+      return <CheckCircle2 className="h-4 w-4 text-emerald-600" />;
+    case "pending":
+      return <Clock className="h-4 w-4 text-amber-500" />;
+    case "rejected":
+      return <XCircle className="h-4 w-4 text-rose-600" />;
+    case "cancelled":
+      return <XCircle className="h-4 w-4 text-slate-500" />;
+    case "completed":
+      return <CheckCircle2 className="h-4 w-4 text-indigo-600" />;
+    default:
+      return <ClipboardList className="h-4 w-4 text-slate-500" />;
+  }
+}
+
+function RequestGrid({ type, rows, loading, onCancel }) {
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <SkeletonCard />
+        <SkeletonCard />
       </div>
+    );
+  }
 
-      {!isVisitorLoggedIn ? (
-        <Alert variant="destructive" className="border-rose-200">
-          <AlertTitle className="flex items-center gap-2">
-            <XCircle className="h-4 w-4" />
-            Not logged in
-          </AlertTitle>
-          <AlertDescription>
-            Please login as a visitor to view your requests.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {err ? (
-        <Alert variant="destructive" className="border-rose-200">
-          <AlertTitle className="flex items-center gap-2">
-            <XCircle className="h-4 w-4" />
-            Some requests failed to load
-          </AlertTitle>
-          <AlertDescription className="break-words">{err}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      <Card>
-        <CardContent className="pt-6 space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <Label>Search</Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                <Input
-                  value={qInput}
-                  onChange={(e) => setQInput(e.target.value)}
-                  placeholder="Search by type, status, plot id, deceased name…"
-                  className="pl-9"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <Label>Type</Label>
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All ({counts.all})</SelectItem>
-                  <SelectItem value="reservation">Reservation ({counts.reservation})</SelectItem>
-                  <SelectItem value="inquiry">Inquiry ({counts.inquiry})</SelectItem>
-                  <SelectItem value="maintenance">Maintenance ({counts.maintenance})</SelectItem>
-                  <SelectItem value="burial">Burial ({counts.burial})</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="rounded-xl border bg-white/60 p-3">
-              <div className="text-xs text-slate-500">Signed in</div>
-              <div className="mt-1 font-semibold text-slate-900 truncate">
-                {displayName || "Visitor"}
-              </div>
-              <div className="text-xs text-slate-500 mt-1">
-                Total requests: <span className="font-medium text-slate-700">{counts.all}</span>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-white/80 backdrop-blur border-slate-200">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Requests</CardTitle>
-          <CardDescription>
-            Click “Details” to inspect the raw record. Use “Open page” to go to the source feature.
+  if (!rows || rows.length === 0) {
+    return (
+      <Card className="border-dashed border-slate-300 bg-gradient-to-br from-slate-50 to-slate-100">
+        <CardHeader>
+          <CardTitle className="text-base text-slate-700">No requests yet</CardTitle>
+          <CardDescription className="text-slate-600">
+            Submit a request and it will appear here.
           </CardDescription>
         </CardHeader>
-
-        <CardContent>
-          {loading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-600">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading…
-            </div>
-          ) : !filtered.length ? (
-            <div className="text-sm text-slate-600">
-              No requests found.
-              <div className="mt-2 text-xs text-slate-500">
-                Tip: If Maintenance/Burial counts are 0, check if your backend endpoints exist and return data.
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-md border overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Ref</TableHead>
-                    <TableHead>Deceased / Summary</TableHead>
-                    <TableHead>Plot</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {filtered.map((r, idx) => {
-                    const t = typeBadge(r.kind);
-                    const s = statusBadge(r.status);
-                    return (
-                      <TableRow key={`${r.kind}-${r.id ?? idx}`}>
-                        <TableCell>
-                          <Badge className={t.cls}>{t.label}</Badge>
-                        </TableCell>
-
-                        <TableCell className="font-medium">
-                          {r.id ?? "—"}
-                        </TableCell>
-
-                        <TableCell>
-                          <div className="text-sm font-medium text-slate-900">
-                            {r.deceased_name || "—"}
-                          </div>
-                          <div className="text-xs text-slate-600">
-                            {r.summary || "—"}
-                          </div>
-                        </TableCell>
-
-                        <TableCell className="text-sm">
-                          {r.plot_id != null ? `#${String(r.plot_id)}` : "—"}
-                        </TableCell>
-
-                        <TableCell>
-                          <Badge className={s.cls}>{s.label}</Badge>
-                        </TableCell>
-
-                        <TableCell className="text-sm">
-                          {fmtDateTime(r.created_at)}
-                        </TableCell>
-
-                        <TableCell className="text-right space-x-2">
-                          <Button size="sm" variant="outline" onClick={() => openDetails(r)}>
-                            <Info className="mr-2 h-4 w-4" />
-                            Details
-                          </Button>
-                          <Button size="sm" onClick={() => goToSourcePage(r)}>
-                            Open page
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
       </Card>
+    );
+  }
 
-      <div className="text-xs text-slate-500">
-        Quick links:{" "}
-        <NavLink className="underline" to="/visitor/inquire">
-          Requests (Inquire)
-        </NavLink>{" "}
-        •{" "}
-        <NavLink className="underline" to="/visitor/reservation">
-          Reservation
-        </NavLink>
-      </div>
+  const sorted = [...rows].sort((a, b) => {
+    const sa = normStatus(a.status);
+    const sb = normStatus(b.status);
+    const ga = sa === "pending" ? 0 : 1;
+    const gb = sb === "pending" ? 0 : 1;
+    if (ga !== gb) return ga - gb;
 
-      {/* Details Dialog */}
-      <Dialog
-        open={open}
-        onOpenChange={(o) => {
-          setOpen(o);
-          if (!o) setActiveRow(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-[900px] max-h-[85vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle>Request Details</DialogTitle>
-            <DialogDescription>Raw record (for debugging)</DialogDescription>
-          </DialogHeader>
+    const ta = new Date(a.created_at || a.updated_at || 0).getTime();
+    const tb = new Date(b.created_at || b.updated_at || 0).getTime();
+    return tb - ta;
+  });
 
-          {activeRow ? (
-            <div className="space-y-3 text-sm">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                <div className="rounded-md border p-3 bg-white">
-                  <div className="text-xs text-slate-500">Type</div>
-                  <div className="font-medium">{activeRow.kind}</div>
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {sorted.map((r) => {
+        const id = r.id ?? r.request_id ?? r.reference_no ?? "-";
+        const status = normStatus(r.status);
+
+        const isClosed =
+          status === "cancelled" ||
+          status === "rejected" ||
+          status === "completed";
+
+        return (
+          <Card
+            key={`${type}-${id}`}
+            className="relative overflow-hidden border-emerald-100/50 bg-white/80 backdrop-blur hover:shadow-lg transition-all duration-300"
+          >
+            <CardHeader className="relative pb-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <CardTitle className="text-base text-slate-900 font-semibold">
+                    <span className="inline-flex items-center gap-2">
+                      {statusIcon(status)}
+                      <span className="truncate">Request #{id}</span>
+                    </span>
+                  </CardTitle>
+
+                  <CardDescription className="mt-1 space-y-1 text-slate-600">
+                    {type === "burial" ? (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <MessageSquareText className="h-4 w-4 text-slate-400" />
+                          <span className="truncate">
+                            Deceased:{" "}
+                            <span className="font-medium text-slate-800">
+                              {r.deceased_name ?? "—"}
+                            </span>
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <CalendarDays className="h-4 w-4 text-slate-400" />
+                          <span>
+                            {fmtDateShort(pickBurialDate(r))}{" "}
+                            <span className="text-slate-400">•</span>{" "}
+                            {fmtTime(pickBurialTime(r))}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <MapPin className="h-4 w-4 text-slate-400" />
+                          <span className="truncate">Plot: {pickPlotLabel(r)}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <Wrench className="h-4 w-4 text-slate-400" />
+                          <span className="truncate">
+                            Type:{" "}
+                            <span className="font-medium text-slate-800">
+                              {r.request_type || r.category || "—"}
+                            </span>
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Flag className="h-4 w-4 text-slate-400" />
+                          <span className="truncate">
+                            Priority:{" "}
+                            <span className="font-medium text-slate-800">
+                              {r.priority || "—"}
+                            </span>
+                          </span>
+                        </div>
+
+                        {r.plot_code || r.plot_name || r.plot_id ? (
+                          <div className="flex items-center gap-2">
+                            <MapPin className="h-4 w-4 text-slate-400" />
+                            <span className="truncate">
+                              Plot: {r.plot_code || r.plot_name || r.plot_id}
+                            </span>
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </CardDescription>
                 </div>
-                <div className="rounded-md border p-3 bg-white">
-                  <div className="text-xs text-slate-500">Status</div>
-                  <div className="font-medium">{activeRow.status}</div>
-                </div>
-                <div className="rounded-md border p-3 bg-white">
-                  <div className="text-xs text-slate-500">Plot</div>
-                  <div className="font-medium">{activeRow.plot_id != null ? `#${activeRow.plot_id}` : "—"}</div>
+
+                <div className="shrink-0">
+                  <StatusBadge status={status} />
                 </div>
               </div>
+            </CardHeader>
 
-              <div className="rounded-md border p-3 bg-white">
-                <div className="text-xs text-slate-500 mb-2">JSON</div>
-                <pre className="text-xs whitespace-pre-wrap break-words">
-                  {JSON.stringify(activeRow.raw, null, 2)}
-                </pre>
+            <CardContent className="relative space-y-3">
+              <Separator className="bg-gradient-to-r from-transparent via-emerald-200 to-transparent" />
+
+              {r.notes || r.description ? (
+                <div className="text-sm text-slate-700 whitespace-pre-wrap">
+                  {r.notes || r.description}
+                </div>
+              ) : null}
+
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 shadow-md hover:shadow-lg transition-all hover:border-rose-300"
+                  onClick={() => onCancel(type, id)}
+                  disabled={isClosed || status === "approved" || status === "confirmed"}
+                  title={
+                    isClosed
+                      ? "This request is already closed"
+                      : "Cancel this request"
+                  }
+                >
+                  <X className="h-4 w-4" />
+                  Cancel
+                </Button>
               </div>
-            </div>
-          ) : null}
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Close
-            </Button>
-            {activeRow ? (
-              <Button onClick={() => goToSourcePage(activeRow)}>
-                Open page
-              </Button>
-            ) : null}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }
