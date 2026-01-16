@@ -1,6 +1,6 @@
-// Inquire.jsx
+// frontend/src/views/visitor/pages/Inquire.jsx
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 
 import { Button } from "../../../components/ui/button";
 import {
@@ -46,7 +46,7 @@ import {
 import CemeteryMap, { CEMETERY_CENTER } from "../../../components/map/CemeteryMap.jsx";
 
 const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "";
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "/api";
 
 /* --------------------------- auth helpers --------------------------- */
 function readAuth() {
@@ -77,6 +77,7 @@ async function fetchFirstOk(urls, options) {
 
       if (res.ok) return { res, body, url };
 
+      // allow fallback to other endpoints
       if (res.status === 404) {
         lastErr = new Error(
           typeof body === "string"
@@ -101,6 +102,17 @@ async function fetchFirstOk(urls, options) {
 
 /* --------------------------- small helpers --------------------------- */
 const safeLower = (v) => String(v || "").toLowerCase();
+
+function extractArray(body) {
+  if (Array.isArray(body)) return body;
+  if (Array.isArray(body?.data)) return body.data;
+  if (Array.isArray(body?.rows)) return body.rows;
+  if (Array.isArray(body?.records)) return body.records;
+  if (Array.isArray(body?.result)) return body.result;
+  if (Array.isArray(body?.data?.rows)) return body.data.rows;
+  if (Array.isArray(body?.data?.records)) return body.data.records;
+  return [];
+}
 
 const fmtDateLong = (s) => {
   if (!s) return "—";
@@ -164,6 +176,8 @@ const idEq = (a, b) => {
   return !!A && !!B && A === B;
 };
 
+const isTruthyStr = (v) => v != null && String(v).trim() !== "";
+
 /* -------------------- GeoJSON ➜ CemeteryMap helpers -------------------- */
 const DEFAULT_PLOT_STYLE = {
   strokeOpacity: 0.8,
@@ -181,7 +195,6 @@ const HIGHLIGHTED_PLOT_STYLE = {
 
 function getFeatId(feature) {
   const p = feature?.properties || {};
-  // ✅ IMPORTANT: include plot_id / plotId first because your app uses plot_id everywhere
   return p.plot_id != null
     ? String(p.plot_id)
     : p.plotId != null
@@ -199,7 +212,6 @@ function featureMatchesHighlighted(feature, highlightedId) {
   const p = feature?.properties || {};
   const fid = getFeatId(feature);
 
-  // ✅ match by featureId OR plot_id OR plotId OR id/uid
   return (
     idEq(fid, highlightedId) ||
     idEq(p.plot_id, highlightedId) ||
@@ -298,7 +310,6 @@ function fcToMapShapes(fc, highlightedId) {
 }
 
 function normalizeFeatureCollection(json) {
-  // ✅ Many APIs return { data: FeatureCollection } or { data: { features: [] } }
   const maybe =
     json?.data?.featureCollection ||
     json?.data?.fc ||
@@ -307,28 +318,24 @@ function normalizeFeatureCollection(json) {
     json;
 
   if (maybe?.type === "FeatureCollection" && Array.isArray(maybe.features)) return maybe;
-
-  // sometimes: { features: [...] }
   if (Array.isArray(maybe?.features)) return { type: "FeatureCollection", features: maybe.features };
-
-  // sometimes: { data: { type, features } } already handled above
   return null;
+}
+
+function getTodayYMD() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 /* =======================================================================
    PAGE
 ======================================================================= */
-
-
-function getTodayYMD() {
-  const d = new Date(); // local time
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`; // YYYY-MM-DD
-}
-
 export default function Inquire() {
+  const location = useLocation();
+
   const auth = useMemo(() => readAuth(), []);
   const currentUser = auth?.user || {};
   const token = getToken(auth);
@@ -340,10 +347,18 @@ export default function Inquire() {
     () => (token ? { Authorization: `Bearer ${token}` } : {}),
     [token]
   );
-const todayYMD = useMemo(() => getTodayYMD(), []);
 
-  // ✅ Request type
-  const [requestType, setRequestType] = useState("maintenance"); // "maintenance" | "burial"
+  const todayYMD = useMemo(() => getTodayYMD(), []);
+
+  // ✅ Request type: "maintenance" | "burial"
+  const [requestType, setRequestType] = useState("maintenance");
+
+  // ✅ Support /visitor/inquire?type=maintenance|burial
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search);
+    const t = sp.get("type");
+    if (t === "maintenance" || t === "burial") setRequestType(t);
+  }, [location.search]);
 
   // deceased options
   const [deceasedOptions, setDeceasedOptions] = useState([]); // [{ name, plot_id? }]
@@ -363,7 +378,7 @@ const todayYMD = useMemo(() => getTodayYMD(), []);
   const [selectedName, setSelectedName] = useState("");
   const [deceasedName, setDeceasedName] = useState("");
 
-  // ✅ from Reservation -> Inquire (Option B)
+  // ✅ from Reservation -> Inquire (prefill)
   const [prefillReservationId, setPrefillReservationId] = useState(null);
 
   // maintenance form
@@ -422,11 +437,7 @@ const todayYMD = useMemo(() => getTodayYMD(), []);
         ];
 
         const { body } = await fetchFirstOk(urls, { headers: headersAuth });
-        const list = Array.isArray(body?.data)
-          ? body.data
-          : Array.isArray(body)
-          ? body
-          : [];
+        const list = extractArray(body);
 
         const opts = list
           .map((r) => {
@@ -450,7 +461,7 @@ const todayYMD = useMemo(() => getTodayYMD(), []);
     return () => {
       cancelled = true;
     };
-  }, [API_BASE, headersAuth, isVisitorLoggedIn, currentUser.id]);
+  }, [headersAuth, isVisitorLoggedIn, currentUser.id]);
 
   /* -------------------- Load maintenance schedule -------------------- */
   const loadMySchedule = useCallback(async () => {
@@ -467,14 +478,14 @@ const todayYMD = useMemo(() => getTodayYMD(), []);
       ];
 
       const { body } = await fetchFirstOk(urls, { headers: headersAuth });
-      setMySchedule(Array.isArray(body?.data) ? body.data : []);
+      setMySchedule(extractArray(body));
     } catch (e) {
       setScheduleError(e.message || "Failed to load schedule");
       setMySchedule([]);
     } finally {
       setScheduleLoading(false);
     }
-  }, [API_BASE, headersAuth, isVisitorLoggedIn, currentUser.id]);
+  }, [headersAuth, isVisitorLoggedIn, currentUser.id]);
 
   useEffect(() => {
     loadMySchedule();
@@ -498,14 +509,14 @@ const todayYMD = useMemo(() => getTodayYMD(), []);
       ];
 
       const { body } = await fetchFirstOk(urls, { headers: headersAuth });
-      setMyBurialRequests(Array.isArray(body?.data) ? body.data : []);
+      setMyBurialRequests(extractArray(body));
     } catch (e) {
       setBurialError(e.message || "Failed to load burial requests");
       setMyBurialRequests([]);
     } finally {
       setBurialLoading(false);
     }
-  }, [API_BASE, headersAuth, isVisitorLoggedIn, currentUser.id]);
+  }, [headersAuth, isVisitorLoggedIn, currentUser.id]);
 
   useEffect(() => {
     loadMyBurialRequests();
@@ -516,19 +527,18 @@ const todayYMD = useMemo(() => getTodayYMD(), []);
     try {
       const res = await fetch(`${API_BASE}/plot/`, { headers: headersAuth });
       const json = await res.json().catch(() => null);
-
       const normalized = normalizeFeatureCollection(json);
       setFc(normalized);
     } catch {
       setFc(null);
     }
-  }, [API_BASE, headersAuth]);
+  }, [headersAuth]);
 
   useEffect(() => {
     loadPlotsGeo();
   }, [loadPlotsGeo]);
 
-  /* -------------------- Option B: Prefill from query params / localStorage -------------------- */
+  /* -------------------- Prefill from query params / localStorage -------------------- */
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -553,6 +563,7 @@ const todayYMD = useMemo(() => getTodayYMD(), []);
       used = true;
     }
 
+    // if we were sent from reservation, switch to burial
     if (used && (qpRes || qpPlot)) {
       setRequestType("burial");
       return;
@@ -648,6 +659,7 @@ const todayYMD = useMemo(() => getTodayYMD(), []);
     setSubmitting(true);
     try {
       if (requestType === "maintenance") {
+        // ✅ MAINTENANCE
         if (!String(maintenanceForm.description || "").trim()) {
           setMsg({ type: "error", text: "Description is required." });
           return;
@@ -659,21 +671,6 @@ const todayYMD = useMemo(() => getTodayYMD(), []);
           });
           return;
         }
-// ✅ prevent future birth/death
-if (burialForm.birthDate > todayYMD) {
-  setMsg({ type: "error", text: "Birth date cannot be in the future." });
-  return;
-}
-if (burialForm.deathDate > todayYMD) {
-  setMsg({ type: "error", text: "Death date cannot be in the future." });
-  return;
-}
-
-// (optional but recommended)
-if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < burialForm.birthDate) {
-  setMsg({ type: "error", text: "Death date cannot be earlier than birth date." });
-  return;
-}
 
         const payload = {
           deceased_name: dn,
@@ -718,6 +715,27 @@ if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < buria
           return;
         }
 
+        // ✅ prevent future birth/death
+        if (burialForm.birthDate > todayYMD) {
+          setMsg({ type: "error", text: "Birth date cannot be in the future." });
+          return;
+        }
+        if (burialForm.deathDate > todayYMD) {
+          setMsg({ type: "error", text: "Death date cannot be in the future." });
+          return;
+        }
+
+        if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < burialForm.birthDate) {
+          setMsg({ type: "error", text: "Death date cannot be earlier than birth date." });
+          return;
+        }
+
+        // optional sanity check
+        if (burialForm.deathDate && burialForm.burialDate && burialForm.burialDate < burialForm.deathDate) {
+          setMsg({ type: "error", text: "Burial date cannot be earlier than death date." });
+          return;
+        }
+
         const plot_id = linkedPlotIdForBurial;
         if (!plot_id) {
           setMsg({
@@ -735,9 +753,7 @@ if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < buria
           burial_date: burialForm.burialDate,
           family_contact: currentUser.id,
           plot_id: String(plot_id),
-          ...(prefillReservationId
-            ? { reservation_id: String(prefillReservationId) }
-            : {}),
+          ...(prefillReservationId ? { reservation_id: String(prefillReservationId) } : {}),
         };
 
         const urls = [
@@ -762,6 +778,7 @@ if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < buria
         await loadMyBurialRequests();
       }
 
+      // keep dropdown containing typed name (optional)
       setDeceasedOptions((prev) => {
         if (prev.some((n) => safeLower(n.name) === safeLower(dn))) return prev;
         return [...prev, { name: dn, plot_id: null }].sort((a, b) =>
@@ -905,6 +922,7 @@ if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < buria
       ).length,
     [mySchedule]
   );
+
   const burialPending = useMemo(
     () =>
       myBurialRequests.filter(
@@ -1213,34 +1231,38 @@ if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < buria
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="space-y-2">
                         <Label>Birth Date</Label>
-                      <Input
-  type="date"
-  value={burialForm.birthDate}
-  max={todayYMD} // ✅ prevents future
-  onChange={(e) => {
-    const v = e.target.value || "";
-    setBurialForm((f) => ({ ...f, birthDate: v && v > todayYMD ? todayYMD : v }));
-  }}
-  disabled={!isVisitorLoggedIn || submitting}
-  className="bg-white/70"
-/>
-
+                        <Input
+                          type="date"
+                          value={burialForm.birthDate}
+                          max={todayYMD}
+                          onChange={(e) => {
+                            const v = e.target.value || "";
+                            setBurialForm((f) => ({
+                              ...f,
+                              birthDate: v && v > todayYMD ? todayYMD : v,
+                            }));
+                          }}
+                          disabled={!isVisitorLoggedIn || submitting}
+                          className="bg-white/70"
+                        />
                       </div>
 
                       <div className="space-y-2">
                         <Label>Death Date</Label>
-                     <Input
-  type="date"
-  value={burialForm.deathDate}
-  max={todayYMD} // ✅ prevents future
-  onChange={(e) => {
-    const v = e.target.value || "";
-    setBurialForm((f) => ({ ...f, deathDate: v && v > todayYMD ? todayYMD : v }));
-  }}
-  disabled={!isVisitorLoggedIn || submitting}
-  className="bg-white/70"
-/>
-
+                        <Input
+                          type="date"
+                          value={burialForm.deathDate}
+                          max={todayYMD}
+                          onChange={(e) => {
+                            const v = e.target.value || "";
+                            setBurialForm((f) => ({
+                              ...f,
+                              deathDate: v && v > todayYMD ? todayYMD : v,
+                            }));
+                          }}
+                          disabled={!isVisitorLoggedIn || submitting}
+                          className="bg-white/70"
+                        />
                       </div>
 
                       <div className="space-y-2">
@@ -1325,7 +1347,6 @@ if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < buria
                   <Button
                     variant="outline"
                     onClick={() => {
-                      // re-trigger fitBounds by "touching" state
                       setManualPlotId(String(highlightedPlotId));
                       scrollToMap();
                     }}
@@ -1355,7 +1376,6 @@ if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < buria
                   markers={mapShapes.markers}
                   showLegend={true}
                   onMapLoad={(m) => setMapRef(m)}
-                  // ⚠️ your CemeteryMap must call this on polygon click
                   onEditPlot={(poly) => {
                     const pid =
                       poly?.featureId ??
@@ -1364,9 +1384,7 @@ if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < buria
                       poly?.properties?.plotId ??
                       poly?.properties?.id ??
                       poly?.properties?.uid;
-                    if (pid != null) {
-                      setManualPlotId(String(pid));
-                    }
+                    if (pid != null) setManualPlotId(String(pid));
                   }}
                 />
               </div>
@@ -1376,7 +1394,6 @@ if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < buria
                 directly to that plot.
               </p>
 
-              {/* tiny debug hint for you */}
               <p className="text-[11px] text-slate-500">
                 Debug: plots loaded = {fc?.features?.length || 0} • polygons rendered ={" "}
                 {mapShapes.polygons.length}
@@ -1523,7 +1540,6 @@ if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < buria
                                 });
                                 return;
                               }
-                              // ✅ FIX: set plot id directly (no schedule-id chain)
                               setManualPlotId(String(plotId));
                               scrollToMap();
                             }}
@@ -1719,8 +1735,7 @@ if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < buria
                       >
                         <Star
                           className={
-                            "h-6 w-6 " +
-                            (rating >= i ? "text-amber-500" : "text-slate-300")
+                            "h-6 w-6 " + (rating >= i ? "text-amber-500" : "text-slate-300")
                           }
                           fill={rating >= i ? "currentColor" : "none"}
                         />

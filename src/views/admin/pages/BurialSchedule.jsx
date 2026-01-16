@@ -462,9 +462,7 @@ function BurialScheduleInner() {
 
   const [apiError, setApiError] = useState(null);
   const [runtimeErrors, setRuntimeErrors] = useState([]);
-  const [showDebug, setShowDebug] = useState(
-    (typeof import.meta !== "undefined" && import.meta.env?.DEV) || false
-  );
+
 
   useEffect(() => {
     const onError = (ev) => {
@@ -694,22 +692,27 @@ function BurialScheduleInner() {
     [fc, highlightedPlotId]
   );
 
-  const onConfirm = async (row) => {
-    const id = row?.id ?? row?.uid;
-    if (!id) return toast.error("Missing request id.");
+const onConfirm = async (row) => {
+  const id = row?.id; // ✅ only DB id
 
-    try {
-      toast.message("Confirming burial request...");
-      await confirmBurialRequest(id);
-      toast.success("Request confirmed, plot was updated to occupied.");
-      await fetchRequests();
-      await fetchPlots();
-      await fetchPlotsGeo();
-    } catch (e) {
-      console.error("confirm error:", e);
-      toast.error(e?.message || "Failed to confirm request.");
-    }
-  };
+  if (id === null || id === undefined) {
+    console.error("Row missing id:", row);
+    return toast.error("Missing request id.");
+  }
+
+  try {
+    toast.message("Confirming burial request...");
+    await confirmBurialRequest(id);
+    toast.success("Request confirmed, plot was updated to occupied.");
+    await fetchRequests();
+    await fetchPlots();
+    await fetchPlotsGeo();
+  } catch (e) {
+    console.error("confirm error:", e);
+    toast.error(e?.message || "Failed to confirm request.");
+  }
+};
+
 
   return (
     <div className="w-full">
@@ -736,15 +739,6 @@ function BurialScheduleInner() {
                 Refresh
               </Button>
 
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={() => setShowDebug((s) => !s)}
-                title="Toggle debug panel"
-              >
-                <Bug className="h-4 w-4" />
-                Debug
-              </Button>
             </div>
           </div>
 
@@ -762,46 +756,7 @@ function BurialScheduleInner() {
             <MiniStat icon={ShieldCheck} label="Completed" value={stats.completed} />
           </div>
 
-          {showDebug ? (
-            <div className="mt-3 rounded-xl border bg-white p-3 text-xs text-slate-700">
-              <div className="font-semibold mb-2">Debug Panel</div>
-              <div className="grid gap-1">
-                <div>
-                  <span className="text-slate-500">API_BASE:</span>{" "}
-                  <span className="font-mono">{API_BASE || "(empty = same origin)"}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500">Rows:</span> {rows.length}{" "}
-                  <span className="text-slate-500">Filtered:</span> {filtered.length}
-                </div>
-                <div>
-                  <span className="text-slate-500">GeoJSON loaded:</span>{" "}
-                  {fc?.features ? `yes (${fc.features.length} features)` : "no"}
-                </div>
-                <div>
-                  <span className="text-slate-500">Available plots:</span>{" "}
-                  {plots.length}
-                </div>
-              </div>
-
-              {runtimeErrors.length ? (
-                <>
-                  <Separator className="my-2" />
-                  <div className="font-semibold mb-1">Runtime Errors</div>
-                  <div className="space-y-2">
-                    {runtimeErrors.map((e) => (
-                      <div key={e.ts} className="rounded-lg bg-slate-50 p-2">
-                        <div className="text-slate-500">
-                          {e.type} • {new Date(e.ts).toLocaleTimeString()}
-                        </div>
-                        <div className="font-mono whitespace-pre-wrap">{e.msg}</div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-            </div>
-          ) : null}
+         
         </CardHeader>
 
         <CardContent>
@@ -872,7 +827,7 @@ function BurialScheduleInner() {
 
                   return (
                     <div
-                      key={r.id ?? r.uid ?? `${r.deceased_name}-${Math.random()}`}
+                      key={String(r.id) ?? r.uid ?? `${r.deceased_name}-${Math.random()}`}
                       className="grid grid-cols-12 items-center px-4 py-3 text-sm hover:bg-slate-50"
                       onMouseEnter={() => setHoveredRow(r)}
                       onMouseLeave={() => setHoveredRow(null)}

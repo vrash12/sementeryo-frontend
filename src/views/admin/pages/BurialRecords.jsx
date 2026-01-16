@@ -3,44 +3,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { getAuth } from "../../../utils/auth";
 import { Toaster } from "sonner";
 
-import { RefreshCcw, Search, Loader2, XCircle, MapPin, Info } from "lucide-react";
+import { RefreshCcw, Search, Loader2, XCircle, MapPin, Info, RotateCcw } from "lucide-react";
 
 // shadcn/ui
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
 import { Badge } from "../../../components/ui/badge";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from "../../../components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../../../components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "../../../components/ui/dialog";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../../../components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../../../components/ui/dialog";
 import { Alert, AlertTitle, AlertDescription } from "../../../components/ui/alert";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "../../../components/ui/select";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../../../components/ui/select";
 
 const API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "/api";
@@ -85,40 +59,86 @@ function extractList(body) {
   return [];
 }
 
-function extractPlotRows(body) {
-  // GeoJSON FeatureCollection
-  if (body?.type === "FeatureCollection" && Array.isArray(body?.features)) {
-    return body.features.map((f) => ({
-      ...(f?.properties || {}),
-      geometry: f?.geometry || null,
-    }));
-  }
-
-  // plain array or wrapped array
-  if (Array.isArray(body)) return body;
-
-  const arr = extractList(body);
-  if (Array.isArray(arr) && arr.length) return arr;
-
-  return [];
-}
+const safeLower = (v) => String(v || "").toLowerCase();
 
 function isTruthyStr(v) {
   return v != null && String(v).trim() !== "";
 }
 
 function statusBadgeProps(statusRaw) {
-  const s = String(statusRaw || "").toLowerCase();
-  if (s === "available")
-    return { label: "Available", className: "bg-emerald-600 hover:bg-emerald-600" };
-  if (s === "reserved")
-    return { label: "Reserved", className: "bg-amber-500 hover:bg-amber-500" };
-  if (s === "occupied")
-    return { label: "Occupied", className: "bg-rose-600 hover:bg-rose-600" };
+  const s = safeLower(statusRaw);
+  if (s === "available") return { label: "Available", className: "bg-emerald-600 hover:bg-emerald-600" };
+  if (s === "reserved") return { label: "Reserved", className: "bg-amber-500 hover:bg-amber-500" };
+  if (s === "occupied") return { label: "Occupied", className: "bg-rose-600 hover:bg-rose-600" };
   return { label: statusRaw || "—", className: "bg-slate-500 hover:bg-slate-500" };
 }
 
-const safeLower = (v) => String(v || "").toLowerCase();
+/**
+ * ✅ Normalize plot rows so the UI won't be empty due to mismatched field names.
+ * Supports:
+ * - status vs plot_status vs plotStatus
+ * - person_full_name vs personFullName vs deceased_name
+ * - date_of_birth vs birth_date, etc.
+ * - id vs plot_id vs plotId
+ * - uid vs plot_uid vs plotUid
+ */
+function normalizePlotRow(r) {
+  const status = r?.status ?? r?.plot_status ?? r?.plotStatus ?? null;
+
+  const person_full_name =
+    r?.person_full_name ??
+    r?.personFullName ??
+    r?.deceased_name ??
+    r?.deceasedName ??
+    null;
+
+  const date_of_birth =
+    r?.date_of_birth ?? r?.dateOfBirth ?? r?.birth_date ?? r?.birthDate ?? null;
+
+  const date_of_death =
+    r?.date_of_death ?? r?.dateOfDeath ?? r?.death_date ?? r?.deathDate ?? null;
+
+  const id = r?.id ?? r?.plot_id ?? r?.plotId ?? null;
+  const uid = r?.uid ?? r?.plot_uid ?? r?.plotUid ?? null;
+
+  const plot_name =
+    r?.plot_name ?? r?.plotName ?? r?.plot_code ?? r?.plotCode ?? r?.name ?? null;
+
+  const plot_code = r?.plot_code ?? r?.plotCode ?? null;
+
+  return {
+    ...r,
+    id,
+    uid,
+    status,
+    person_full_name,
+    date_of_birth,
+    date_of_death,
+    plot_name,
+    plot_code,
+  };
+}
+
+function extractPlotRows(body) {
+  // GeoJSON FeatureCollection
+  if (body?.type === "FeatureCollection" && Array.isArray(body?.features)) {
+    return body.features.map((f) =>
+      normalizePlotRow({
+        ...(f?.properties || {}),
+        geometry: f?.geometry || null,
+      })
+    );
+  }
+
+  // plain array
+  if (Array.isArray(body)) return body.map(normalizePlotRow);
+
+  // wrapped array
+  const arr = extractList(body);
+  if (Array.isArray(arr) && arr.length) return arr.map(normalizePlotRow);
+
+  return [];
+}
 
 export default function BurialRecords() {
   const auth = getAuth();
@@ -146,9 +166,9 @@ export default function BurialRecords() {
   const [qInput, setQInput] = useState("");
   const q = useDebouncedValue(qInput, 180);
 
-  // NEW: filters for deceased list
-  const [deceasedOnly, setDeceasedOnly] = useState(true); // ✅ default ON
-  const [statusFilter, setStatusFilter] = useState("occupied"); // ✅ default occupied
+  // ✅ defaults changed so it shows something immediately
+  const [deceasedOnly, setDeceasedOnly] = useState(false); // default: show all plots
+  const [statusFilter, setStatusFilter] = useState("all"); // default: all statuses
 
   // pagination
   const [page, setPage] = useState(1);
@@ -173,11 +193,15 @@ export default function BurialRecords() {
       });
 
       const ct = res.headers.get("content-type") || "";
-      const body = ct.includes("application/json") ? await res.json() : await res.text();
+      const body = ct.includes("application/json")
+        ? await res.json().catch(() => ({}))
+        : await res.text().catch(() => "");
 
       if (!res.ok) {
         const msg =
-          typeof body === "string" ? body : body?.error || body?.message || JSON.stringify(body);
+          typeof body === "string"
+            ? body
+            : body?.error || body?.message || JSON.stringify(body);
         throw new Error(msg || `HTTP ${res.status}`);
       }
 
@@ -213,10 +237,8 @@ export default function BurialRecords() {
 
     return (rows || [])
       .filter((r) => {
-        // ✅ deceased list filter (plots.person_full_name)
         if (deceasedOnly && !isTruthyStr(r?.person_full_name)) return false;
 
-        // ✅ status filter
         const s = safeLower(r?.status);
         if (statusFilter !== "all" && s !== safeLower(statusFilter)) return false;
 
@@ -303,6 +325,14 @@ export default function BurialRecords() {
     [ENDPOINTS, fetchAny]
   );
 
+  const resetFilters = () => {
+    setQInput("");
+    setDeceasedOnly(false);
+    setStatusFilter("all");
+    setPageSize(25);
+    setPage(1);
+  };
+
   return (
     <div className="p-6 space-y-6">
       <Toaster richColors expand={false} />
@@ -311,11 +341,16 @@ export default function BurialRecords() {
         <div>
           <h1 className="text-2xl font-bold">Burial Records (from Plots)</h1>
           <p className="text-sm text-muted-foreground">
-            This list is taken from plots.person_full_name (deceased), not from graves table.
+            This list is taken from plots person_full_name (deceased), but you can also view all plots.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={resetFilters} title="Reset filters">
+            <RotateCcw className="mr-2 h-4 w-4" />
+            Reset
+          </Button>
+
           <Button variant="outline" onClick={load} disabled={loading} title="Refresh">
             <RefreshCcw className={["mr-2 h-4 w-4", loading ? "animate-spin" : ""].join(" ")} />
             Refresh
@@ -352,7 +387,10 @@ export default function BurialRecords() {
             <div className="flex flex-wrap items-end gap-3 justify-between lg:justify-end">
               <div className="min-w-[180px]">
                 <Label className="text-xs text-slate-500">Show</Label>
-                <Select value={deceasedOnly ? "deceased" : "all"} onValueChange={(v) => setDeceasedOnly(v === "deceased")}>
+                <Select
+                  value={deceasedOnly ? "deceased" : "all"}
+                  onValueChange={(v) => setDeceasedOnly(v === "deceased")}
+                >
                   <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
@@ -449,8 +487,10 @@ export default function BurialRecords() {
 
       <Card className="bg-white/80 backdrop-blur border-slate-200">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Deceased list in plots</CardTitle>
-      
+          <CardTitle className="text-base">Plots list</CardTitle>
+          <CardDescription className="text-sm text-slate-600">
+            Tip: If you want only deceased records, switch “Show” → “Deceased only”.
+          </CardDescription>
         </CardHeader>
 
         <CardContent>
@@ -460,8 +500,22 @@ export default function BurialRecords() {
               Loading…
             </div>
           ) : !filtered.length ? (
-            <div className="text-sm text-slate-600">
-              No rows found. 
+            <div className="text-sm text-slate-600 space-y-2">
+              <div>No rows found.</div>
+              <div className="text-xs text-slate-500">
+                Current filters: Show = <b>{deceasedOnly ? "Deceased only" : "All plots"}</b>, Status ={" "}
+                <b>{statusFilter}</b>, Search = <b>{q.trim() || "—"}</b>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={resetFilters}>
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Reset filters
+                </Button>
+                <Button size="sm" variant="outline" onClick={load}>
+                  <RefreshCcw className="mr-2 h-4 w-4" />
+                  Reload
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="rounded-md border overflow-hidden">
@@ -480,14 +534,14 @@ export default function BurialRecords() {
 
                 <TableBody>
                   {paged.map((r) => {
-                    const idOrUid = r?.id ?? r?.uid ?? Math.random();
+                    const key = String(r?.id ?? r?.uid ?? Math.random());
                     const s = statusBadgeProps(r?.status);
 
                     return (
-                      <TableRow key={String(idOrUid)}>
+                      <TableRow key={key}>
                         <TableCell className="font-medium">
                           {r?.id ?? "—"}
-                          {r?.uid ? (
+                          {isTruthyStr(r?.uid) ? (
                             <div className="text-xs text-slate-500">uid: {String(r.uid)}</div>
                           ) : null}
                         </TableCell>
@@ -570,17 +624,23 @@ export default function BurialRecords() {
             <div className="text-sm space-y-2">
               <div className="rounded-md border p-3 bg-white">
                 <div className="text-xs text-slate-500">Person Full Name</div>
-                <div className="font-medium">{details.person_full_name ?? "—"}</div>
+                <div className="font-medium">
+                  {details.person_full_name ?? details.personFullName ?? details.deceased_name ?? "—"}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="rounded-md border p-3 bg-white">
                   <div className="text-xs text-slate-500">Date of Birth</div>
-                  <div className="font-medium">{formatDate(details.date_of_birth)}</div>
+                  <div className="font-medium">
+                    {formatDate(details.date_of_birth ?? details.birth_date ?? details.birthDate)}
+                  </div>
                 </div>
                 <div className="rounded-md border p-3 bg-white">
                   <div className="text-xs text-slate-500">Date of Death</div>
-                  <div className="font-medium">{formatDate(details.date_of_death)}</div>
+                  <div className="font-medium">
+                    {formatDate(details.date_of_death ?? details.death_date ?? details.deathDate)}
+                  </div>
                 </div>
               </div>
 
@@ -594,12 +654,7 @@ export default function BurialRecords() {
           )}
 
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              type="button"
-              onClick={() => setOpen(false)}
-              disabled={detailsBusy}
-            >
+            <Button variant="outline" type="button" onClick={() => setOpen(false)} disabled={detailsBusy}>
               Close
             </Button>
             <Button type="button" onClick={load} disabled={loading}>
