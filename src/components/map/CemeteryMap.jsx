@@ -99,7 +99,7 @@ export const CEMETERY_BOUNDS = {
 };
 
 // ============================================================================
-// INITIAL ROADS (YELLOW LINES) — kept for routing graph, but hidden by default
+// INITIAL ROADS (YELLOW LINES), kept for routing graph, hidden by default
 // ============================================================================
 export const INITIAL_ROAD_SEGMENTS = [
   {
@@ -180,8 +180,7 @@ function isInsideSinglePolygon(lat, lng, polygon) {
       yi = poly[i].y;
     const xj = poly[j].x,
       yj = poly[j].y;
-    const intersect =
-      yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
     if (intersect) inside = !inside;
   }
   return inside;
@@ -218,7 +217,7 @@ const DEFAULT_MODAL_FIELDS = [
   { name: "price", label: "Price", type: "text" },
 ];
 
-// ✅ Status colors (legend + optional fallback)
+// Status colors (legend + optional fallback)
 const STATUS_COLORS = {
   available: { label: "Available", color: "#10b981" },
   reserved: { label: "Reserved", color: "#f59e0b" },
@@ -246,7 +245,7 @@ function getPolyStyleWithStatusFallback(poly) {
   };
 }
 
-// ---------- pretty marker icons (user / target) ----------
+// pretty marker icons (user / target)
 function svgToDataUrl(svg) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
@@ -321,12 +320,14 @@ export default function CemeteryMap({
 
   onEditPlot,
 
-  // ✅ UI toggles
+  // UI toggles
   showLegend = true,
 
-  // ✅ CHANGE HERE: hide yellow road overlay by default
-  // If ever you want them back on a specific page, pass showInitialRoads={true}
+  // hide yellow road overlay by default
   showInitialRoads = false,
+
+  // ✅ NEW: allow pages to disable cemetery bounds restriction (home testing)
+  restrictToCemeteryBounds = true,
 
   onMapLoad,
 }) {
@@ -397,13 +398,7 @@ export default function CemeteryMap({
 
       onCoordinatePick({ lat, lng });
     },
-    [
-      clickable,
-      onCoordinatePick,
-      restrictToGeofence,
-      onClickOutsideGeofence,
-      enableDrawing,
-    ]
+    [clickable, onCoordinatePick, restrictToGeofence, onClickOutsideGeofence, enableDrawing]
   );
 
   const handlePolygonClick = (e, poly) => {
@@ -417,8 +412,8 @@ export default function CemeteryMap({
     setSelectedGrave(poly);
   };
 
-  const options = useMemo(
-    () => ({
+  const options = useMemo(() => {
+    const base = {
       clickableIcons: false,
       fullscreenControl: true,
       streetViewControl: false,
@@ -426,29 +421,29 @@ export default function CemeteryMap({
       zoomControl: true,
       gestureHandling: "greedy",
       mapTypeId: "terrain",
-      restriction: {
-        latLngBounds: CEMETERY_BOUNDS,
-        strictBounds: false,
-      },
-    }),
-    []
-  );
+    };
 
-  if (loadError)
-    return (
-      <div className="text-sm text-destructive">Failed to load Google Maps.</div>
-    );
+    // ✅ Only restrict the map to cemetery bounds when enabled
+    if (restrictToCemeteryBounds) {
+      return {
+        ...base,
+        restriction: {
+          latLngBounds: CEMETERY_BOUNDS,
+          strictBounds: false,
+        },
+      };
+    }
 
-  if (!isLoaded)
-    return <div className="text-sm text-muted-foreground">Loading map…</div>;
+    return base;
+  }, [restrictToCemeteryBounds]);
 
-  // ✅ Only include yellow roads if enabled
-  const allPolylines = [
-    ...(showInitialRoads ? INITIAL_ROAD_POLYLINES : []),
-    ...polylines,
-  ];
+  if (loadError) return <div className="text-sm text-destructive">Failed to load Google Maps.</div>;
+  if (!isLoaded) return <div className="text-sm text-muted-foreground">Loading map…</div>;
 
-  // ✅ avoid crashing if hasRole throws
+  // Only include yellow roads if enabled
+  const allPolylines = [...(showInitialRoads ? INITIAL_ROAD_POLYLINES : []), ...polylines];
+
+  // avoid crashing if hasRole throws
   const isVisitor =
     !onEditPlot &&
     (() => {
@@ -459,8 +454,7 @@ export default function CemeteryMap({
       }
     })();
 
-  const canReserve =
-    isVisitor && normalizeStatus(selectedGrave?.status) === "available";
+  const canReserve = isVisitor && normalizeStatus(selectedGrave?.status) === "available";
 
   return (
     <>
@@ -499,10 +493,7 @@ export default function CemeteryMap({
           ))}
 
           {markers.map((m) => {
-            const icon =
-              m.icon ||
-              (m.iconType ? markerIcons[m.iconType] : undefined) ||
-              undefined;
+            const icon = m.icon || (m.iconType ? markerIcons[m.iconType] : undefined) || undefined;
 
             return (
               <Marker
@@ -518,11 +509,7 @@ export default function CemeteryMap({
           })}
 
           {allPolylines.map((line, idx) => (
-            <Polyline
-              key={line.id || idx}
-              path={line.path}
-              options={line.options}
-            />
+            <Polyline key={line.id || idx} path={line.path} options={line.options} />
           ))}
 
           {enableDrawing && (
@@ -560,10 +547,7 @@ export default function CemeteryMap({
             <div className="text-xs font-semibold text-slate-700">Legend</div>
             <div className="mt-2 space-y-1.5">
               {Object.entries(STATUS_COLORS).map(([key, v]) => (
-                <div
-                  key={key}
-                  className="flex items-center gap-2 text-xs text-slate-700"
-                >
+                <div key={key} className="flex items-center gap-2 text-xs text-slate-700">
                   <span
                     className="inline-block h-3.5 w-3.5 rounded-sm border"
                     style={{ backgroundColor: v.color, borderColor: v.color }}

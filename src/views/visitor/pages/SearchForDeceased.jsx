@@ -1,14 +1,18 @@
 // frontend/src/views/visitor/pages/SearchForDeceased.jsx
 // ✅ Geofence removed from this page so you can test Live Location from home.
 // Notes:
-// - We no longer import/use isInsideGeofence here.
-// - GPS will always start + keep watching if permission is granted.
-// - Routing will fall back to cemetery entrance if you’re too far from the cemetery (to avoid routing/snap failures).
+// - We no longer import or use isInsideGeofence here.
+// - GPS will always start and keep watching if permission is granted.
+// - Routing will fall back to cemetery entrance if you are too far from the cemetery (to avoid routing and snap failures).
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { NavLink } from "react-router-dom";
 import fetchBurialRecords from "../js/get-burial-records";
-import { buildGraph, buildRoutedPolyline, fmtDistance } from "../js/dijkstra-pathfinding";
+import {
+  buildGraph,
+  buildRoutedPolyline,
+  fmtDistance,
+} from "../js/dijkstra-pathfinding";
 
 import CemeteryMap, {
   CEMETERY_CENTER,
@@ -39,14 +43,14 @@ import {
 const MEMORIAL_QUOTE = "To live in hearts we leave behind is not to die.";
 
 function formatDate(s) {
-  if (!s) return "—";
+  if (!s) return "N/A";
 
   const raw = String(s).trim();
 
   // ✅ remove "T16:00:00.000Z" (or any ISO time part) if present
   const dateOnly = raw.includes("T") ? raw.split("T")[0] : raw;
 
-  // If it's "YYYY-MM-DD", parse as LOCAL time to avoid timezone day-shift
+  // If it's "YYYY-MM-DD", parse as LOCAL time to avoid timezone day shift
   const isYMD = /^\d{4}-\d{2}-\d{2}$/.test(dateOnly);
   const d = isYMD ? new Date(`${dateOnly}T00:00:00`) : new Date(raw);
 
@@ -80,12 +84,12 @@ function cameraErrToMessage(err) {
     return "Camera permission denied. Please allow camera access in your browser site settings.";
   if (name === "NotFoundError") return "No camera found on this device.";
   if (name === "NotReadableError")
-    return "Camera is already in use by another app (e.g., Messenger/Zoom/Camera). Close it and try again.";
+    return "Camera is already in use by another app (example Messenger, Zoom, Camera). Close it and try again.";
   if (name === "SecurityError") return "Camera access requires HTTPS (or localhost).";
   return err?.message || "Unable to access camera.";
 }
 
-// ✅ detect current geolocation permission state (best-effort; some browsers don't support it)
+// ✅ detect current geolocation permission state (best effort, some browsers do not support it)
 async function getGeoPermissionState() {
   try {
     const p = await navigator?.permissions?.query?.({ name: "geolocation" });
@@ -142,16 +146,25 @@ function resolvePhotoSrc(photoUrl) {
 }
 
 function getPhotoUrlFromAnything(row, qrData) {
-  return row?.photo_url || row?.photoUrl || qrData?.photo_url || qrData?.photoUrl || "";
+  return (
+    row?.photo_url ||
+    row?.photoUrl ||
+    qrData?.photo_url ||
+    qrData?.photoUrl ||
+    ""
+  );
 }
 
 async function fetchPlotCenterById(plotId) {
   if (!plotId) return null;
 
   try {
-    const res = await fetch(`${API_BASE}/plot/${encodeURIComponent(String(plotId))}`, {
-      headers: { Accept: "application/json" },
-    });
+    const res = await fetch(
+      `${API_BASE}/plot/${encodeURIComponent(String(plotId))}`,
+      {
+        headers: { Accept: "application/json" },
+      }
+    );
     if (!res.ok) return null;
 
     const json = await res.json().catch(() => null);
@@ -219,12 +232,15 @@ function parseLatLngFromToken(token) {
   const mGeo = raw.match(/^geo:([+-]?\d+(?:\.\d+)?),([+-]?\d+(?:\.\d+)?)/i);
   if (mGeo) return { lat: +mGeo[1], lng: +mGeo[2], data: null };
 
-  const mPair = raw.match(/([+-]?\d+(?:\.\d+)?)\s*[,\s]\s*([+-]?\d+(?:\.\d+)?)/i);
+  const mPair = raw.match(
+    /([+-]?\d+(?:\.\d+)?)\s*[,\s]\s*([+-]?\d+(?:\.\d+)?)/i
+  );
   if (mPair) {
     const a = +mPair[1],
       b = +mPair[2];
     const looksLikeLatLng = Math.abs(a) <= 90 && Math.abs(b) <= 180;
-    const looksLikeLngLat = Math.abs(a) <= 180 && Math.abs(b) <= 90 && !looksLikeLatLng;
+    const looksLikeLngLat =
+      Math.abs(a) <= 180 && Math.abs(b) <= 90 && !looksLikeLatLng;
     if (looksLikeLatLng) return { lat: a, lng: b, data: null };
     if (looksLikeLngLat) return { lat: b, lng: a, data: null };
     return { lat: a, lng: b, data: null };
@@ -245,7 +261,7 @@ const capitalizeLabelFromKey = (k) =>
   k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 const formatQrValue = (key, value) => {
-  if (value == null || value === "") return "—";
+  if (value == null || value === "") return "N/A";
   if (key === "lat" || key === "lng")
     return Number.isFinite(+value) ? (+value).toFixed(6) : String(value);
   if (/(_date$|^created_at$|^updated_at$)/.test(key)) return formatDate(value);
@@ -451,7 +467,8 @@ function getNearestComfortRoom(userLoc, comfortRooms) {
 }
 
 // --------------------------- Marker icons (SVG data URLs) ---------------------------
-const svgToDataUrl = (svg) => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+const svgToDataUrl = (svg) =>
+  `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 
 const USER_PIN_SVG = `
 <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -559,14 +576,18 @@ function featureToPath(geom) {
   if (geom.type === "Polygon") {
     const ring = geom.coordinates?.[0] || [];
     return ring
-      .map(([lng, lat]) => (Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null))
+      .map(([lng, lat]) =>
+        Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
+      )
       .filter(Boolean);
   }
 
   if (geom.type === "MultiPolygon") {
     const ring = geom.coordinates?.[0]?.[0] || [];
     return ring
-      .map(([lng, lat]) => (Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null))
+      .map(([lng, lat]) =>
+        Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
+      )
       .filter(Boolean);
   }
 
@@ -584,7 +605,7 @@ export default function SearchForDeceased() {
   const [error, setError] = useState("");
   const [isRequestingLoc, setIsRequestingLoc] = useState(false);
 
-  // ✅ plots/graves for map rendering
+  // ✅ plots for map rendering
   const [plotsFc, setPlotsFc] = useState(null);
   const [loadingPlots, setLoadingPlots] = useState(false);
   const [plotsError, setPlotsError] = useState("");
@@ -621,7 +642,7 @@ export default function SearchForDeceased() {
   const geoWatchIdRef = useRef(null);
   const [mapCoords, setMapCoords] = useState(null);
 
-  // ✅ tracks how location modal was closed to prevent "Allow" -> fallback entrance race
+  // ✅ tracks how location modal was closed to prevent "Allow" -> entrance race
   const locationActionRef = useRef(null); // "allow" | "entrance" | null
 
   // Scan modal
@@ -646,10 +667,10 @@ export default function SearchForDeceased() {
     let alive = true;
 
     (async () => {
-      setRouteStatus("Loading cemetery road network…");
+      setRouteStatus("Loading cemetery road network...");
       try {
         const inputs = [...INITIAL_ROAD_SEGMENTS];
-        setRouteStatus("Building routing graph (connecting intersections)…");
+        setRouteStatus("Building routing graph (connecting intersections)...");
 
         const g = buildGraph(inputs, {
           onlySegments: true,
@@ -693,7 +714,7 @@ export default function SearchForDeceased() {
     };
   }, []);
 
-  // -------------------------- Load plots/graves GeoJSON --------------------------
+  // -------------------------- Load plots GeoJSON --------------------------
   useEffect(() => {
     let ignore = false;
     const ac = new AbortController();
@@ -736,8 +757,8 @@ export default function SearchForDeceased() {
     };
   }, []);
 
-  // -------------------------- Location modal logic (smarter + no repeats) --------------------------
-  // - If permission already granted, auto-start GPS (no modal).
+  // -------------------------- Location modal logic --------------------------
+  // - If permission already granted, auto start GPS (no modal).
   // - Otherwise, show modal when a destination exists.
   useEffect(() => {
     let alive = true;
@@ -751,7 +772,7 @@ export default function SearchForDeceased() {
       if (!alive) return;
 
       if (state === "granted") {
-        // auto-start without asking again
+        // auto start without asking again
         requestUserLocation({ auto: true });
         return;
       }
@@ -779,7 +800,7 @@ export default function SearchForDeceased() {
     [DEFAULT_START]
   );
 
-  // ✅ No geofence gating here — always attempt live location (if allowed)
+  // ✅ No geofence gating here, always attempt live location (if allowed)
   const requestUserLocation = useCallback(
     async ({ auto = false } = {}) => {
       locationActionRef.current = "allow";
@@ -788,10 +809,12 @@ export default function SearchForDeceased() {
       setLocationConsent(true);
       setLocationModalOpen(false);
 
-      // If we already have a location, don't wipe it (prevents flicker + avoids confusing fallback)
+      // If we already have a location, do not wipe it
       hasGoodLocationRef.current = Boolean(userLocation);
 
-      setRouteStatus(auto ? "Starting GPS (permission already granted)…" : "Requesting your location…");
+      setRouteStatus(
+        auto ? "Starting GPS (permission already granted)..." : "Requesting your location..."
+      );
 
       if (!("geolocation" in navigator)) {
         applyEntranceStart("Geolocation not supported. Starting from cemetery entrance.");
@@ -805,9 +828,9 @@ export default function SearchForDeceased() {
         return;
       }
 
-      // If watch is already running, don't restart (reduces repeated prompts)
+      // If watch is already running, do not restart
       if (geoWatchIdRef.current) {
-        setRouteStatus("Live location already running ✅");
+        setRouteStatus("Live location already running.");
         setIsRequestingLoc(false);
         return;
       }
@@ -821,7 +844,7 @@ export default function SearchForDeceased() {
             hasGoodLocationRef.current = true;
             setUserLocation(loc);
             setLocationSource("gps");
-            setRouteStatus(`Live location ✅ (±${Math.round(accuracy || 0)}m)`);
+            setRouteStatus(`Live location (±${Math.round(accuracy || 0)}m)`);
           },
           (err) => {
             console.warn("watchPosition error:", err);
@@ -845,7 +868,7 @@ export default function SearchForDeceased() {
           hasGoodLocationRef.current = true;
           setUserLocation(loc);
           setLocationSource("gps");
-          setRouteStatus(`Location acquired ✅ (±${Math.round(accuracy || 0)}m)`);
+          setRouteStatus(`Location acquired (±${Math.round(accuracy || 0)}m)`);
 
           startWatch();
           setIsRequestingLoc(false);
@@ -858,7 +881,7 @@ export default function SearchForDeceased() {
             code === 1
               ? "Location permission denied."
               : code === 2
-              ? "Location unavailable. Turn on GPS / Location Services and try again."
+              ? "Location unavailable. Turn on GPS and Location Services and try again."
               : code === 3
               ? "Location timed out. Try again (better signal) or use the entrance."
               : "Could not get your location.";
@@ -875,7 +898,7 @@ export default function SearchForDeceased() {
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
       );
     },
-    [applyEntranceStart, userLocation, DEFAULT_START]
+    [applyEntranceStart, userLocation]
   );
 
   const useDefaultLocation = useCallback(() => {
@@ -884,7 +907,7 @@ export default function SearchForDeceased() {
   }, [applyEntranceStart]);
 
   // ✅ Routing start logic WITHOUT geofence:
-  // If you're too far from the cemetery, route from entrance (but GPS can still be acquired).
+  // If you are too far from the cemetery, route from entrance (but GPS can still be acquired).
   const routingStart = useMemo(() => {
     if (!userLocation) return null;
 
@@ -892,8 +915,7 @@ export default function SearchForDeceased() {
 
     const dToCemetery = haversineDistanceM(userLocation, CEMETERY_CENTER);
 
-    // ✅ Increased threshold so being "nearby" won't accidentally force entrance.
-    // (Old was 700m which is often too small.)
+    // ✅ Increased threshold so being "nearby" will not accidentally force entrance.
     const THRESHOLD_M = 5000;
 
     if (dToCemetery > THRESHOLD_M) return DEFAULT_START;
@@ -917,8 +939,8 @@ export default function SearchForDeceased() {
       try {
         setRouteStatus(
           routingSource === "entrance" && locationSource === "gps"
-            ? "GPS is enabled, but you’re far from the cemetery. Routing starts from the cemetery entrance (GPS still active)."
-            : "Computing route along cemetery roads…"
+            ? "GPS is enabled, but you are far from the cemetery. Routing starts from the cemetery entrance (GPS still active)."
+            : "Computing route along cemetery roads..."
         );
         setRouteDistance(0);
         setRoutePath([]);
@@ -948,7 +970,7 @@ export default function SearchForDeceased() {
         setRouteDistance(distance || 0);
         setRoutePath(polyline);
         setRouteSteps(Array.isArray(steps) ? steps : []);
-        setRouteStatus("Route ready ✅");
+        setRouteStatus("Route ready.");
       } catch (e) {
         console.error("Route computation failed:", e);
         if (!cancelled) setRouteStatus("Route computation failed");
@@ -1009,7 +1031,7 @@ export default function SearchForDeceased() {
         const apiRows = unwrapRows(payload);
         if (apiRows.length) baseRows = apiRows;
       } catch (err) {
-        console.warn("Search API failed; using cached rows:", err);
+        console.warn("Search API failed, using cached rows:", err);
       }
 
       if (!baseRows.length) baseRows = Array.isArray(rows) ? rows : [];
@@ -1037,7 +1059,9 @@ export default function SearchForDeceased() {
       const STRONG = 0.7;
       const WEAK_MIN = 0.4;
 
-      const strong = withScores.filter(({ score }) => score >= STRONG).map(({ row }) => row);
+      const strong = withScores
+        .filter(({ score }) => score >= STRONG)
+        .map(({ row }) => row);
 
       const weak = withScores
         .filter(({ score }) => score >= WEAK_MIN && score < STRONG)
@@ -1075,12 +1099,16 @@ export default function SearchForDeceased() {
       coords = await fetchPlotCenterById(row.plot_id);
     }
 
-    setScanDataForSelected(parsed?.data && typeof parsed.data === "object" ? parsed.data : null);
+    setScanDataForSelected(
+      parsed?.data && typeof parsed.data === "object" ? parsed.data : null
+    );
 
     setMapCoords(coords);
 
     if (!coords) {
-      setRouteStatus("Selected record has no location (no lat/lng and plot lookup failed).");
+      setRouteStatus(
+        "Selected record has no location (no lat or lng and plot lookup failed)."
+      );
     }
   }
 
@@ -1098,7 +1126,9 @@ export default function SearchForDeceased() {
 
     if (!isSecureForDeviceAPIs()) {
       setScanModalOpen(true);
-      setScanErr("Camera is blocked on this site. Use HTTPS (or localhost) to enable camera access.");
+      setScanErr(
+        "Camera is blocked on this site. Use HTTPS (or localhost) to enable camera access."
+      );
       return;
     }
 
@@ -1343,7 +1373,7 @@ export default function SearchForDeceased() {
     });
 
     if (!coords) {
-      setRouteStatus("QR scanned, but no location found (no lat/lng and plot lookup failed).");
+      setRouteStatus("QR scanned, but no location found (no lat or lng and plot lookup failed).");
     }
   }
 
@@ -1359,7 +1389,7 @@ export default function SearchForDeceased() {
             <CardTitle className="text-base text-slate-900 flex items-center justify-between gap-3">
               <span className="truncate">{name}</span>
               <span className="shrink-0 rounded-full border bg-white/80 px-2.5 py-1 text-[11px] text-slate-700">
-                Plot: {row?.plot_id ?? "—"}
+                Plot: {row?.plot_id ?? "N/A"}
               </span>
             </CardTitle>
             <CardDescription className="text-slate-600">
@@ -1481,7 +1511,7 @@ export default function SearchForDeceased() {
     ];
   }, []);
 
-  // ✅ Build polygons from plots FeatureCollection (THIS MAKES GRAVES SHOW)
+  // ✅ Build polygons from plots FeatureCollection (this makes graves show)
   const selectedPlotId = useMemo(() => {
     return selected?.plot_id ?? scanResult?.plot_id ?? scanResult?.matchedRow?.plot_id ?? null;
   }, [selected, scanResult]);
@@ -1572,7 +1602,7 @@ export default function SearchForDeceased() {
         return;
       }
 
-      setRouteStatus("Preparing route image download…");
+      setRouteStatus("Preparing route image download...");
 
       const center = meanCenter(routePath) || mapCoords || CEMETERY_CENTER;
       const enc = encodePolyline(routePath);
@@ -1612,9 +1642,7 @@ export default function SearchForDeceased() {
 
       const res = await fetch(url);
       if (!res.ok) {
-        setRouteStatus(
-          "Image download failed. Make sure Google Static Maps API is enabled for your key."
-        );
+        setRouteStatus("Image download failed. Make sure Google Static Maps API is enabled for your key.");
         return;
       }
 
@@ -1629,10 +1657,10 @@ export default function SearchForDeceased() {
       a.remove();
 
       setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-      setRouteStatus("Route image downloaded ✅");
+      setRouteStatus("Route image downloaded.");
     } catch (e) {
       console.error(e);
-      setRouteStatus("Image download failed. Please check API key & Static Maps API.");
+      setRouteStatus("Image download failed. Please check API key and Static Maps API.");
     }
   }, [
     routeReady,
@@ -1703,6 +1731,10 @@ export default function SearchForDeceased() {
     };
   }, []);
 
+  // ✅ Dev only: allow panning outside cemetery bounds so you can see your real GPS location at home.
+  // In production, it stays restricted to cemetery bounds.
+  const restrictToCemeteryBounds = !import.meta.env.DEV;
+
   // =======================================================================
   // UI
   // =======================================================================
@@ -1758,9 +1790,8 @@ export default function SearchForDeceased() {
 
                   <CardDescription className="text-slate-600 max-w-3xl">
                     The map below always shows{" "}
-                    <span className="font-semibold">all graves/plots</span>.
-                    Search by name or scan a QR to pin a specific grave and
-                    (optionally) compute a route.
+                    <span className="font-semibold">all graves and plots</span>.
+                    Search by name or scan a QR to pin a specific grave and optionally compute a route.
                   </CardDescription>
                 </div>
 
@@ -1815,13 +1846,13 @@ export default function SearchForDeceased() {
                         className="h-11 rounded-xl"
                       />
                       <div className="mt-1 text-xs text-slate-500">
-                        Tip: You can type partial names. Results are fuzzy-matched.
+                        Tip: You can type partial names. Results are fuzzy matched.
                       </div>
                     </div>
 
                     <div className="sm:col-span-1 lg:col-span-1 flex gap-2 items-end">
                       <Button type="submit" disabled={searching} className="h-11 rounded-xl">
-                        {searching ? "Searching…" : "Search"}
+                        {searching ? "Searching..." : "Search"}
                       </Button>
                       <Button
                         type="button"
@@ -1841,8 +1872,8 @@ export default function SearchForDeceased() {
                     <div className="rounded-2xl border bg-white/75 p-4">
                       <div className="font-semibold text-slate-900">Scan a QR Code</div>
                       <div className="text-sm text-slate-600 mt-1">
-                        Step 1: Scan or upload the QR. Step 2: Allow location (or
-                        use entrance). Step 3: View the grave pinned on the map.
+                        Step 1: Scan or upload the QR. Step 2: Allow location (or use entrance).
+                        Step 3: View the grave pinned on the map.
                       </div>
                     </div>
 
@@ -1872,8 +1903,8 @@ export default function SearchForDeceased() {
                     </div>
 
                     <div className="text-xs text-slate-500">
-                      QR should include <code>lat/lng</code> (or{" "}
-                      <code>latitude/longitude</code>) OR a valid <code>plot_id</code>.
+                      QR should include <code>lat/lng</code> (or <code>latitude/longitude</code>)
+                      or a valid <code>plot_id</code>.
                     </div>
                   </div>
                 )}
@@ -1977,7 +2008,8 @@ export default function SearchForDeceased() {
                 <CardDescription className="flex flex-wrap items-center gap-2">
                   {routeDistance > 0 && (
                     <span className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs text-slate-700 shadow-sm">
-                      Distance: <span className="font-semibold">{fmtDistance(routeDistance)}</span>
+                      Distance:{" "}
+                      <span className="font-semibold">{fmtDistance(routeDistance)}</span>
                     </span>
                   )}
 
@@ -1999,7 +2031,7 @@ export default function SearchForDeceased() {
 
                 {loadingPlots && (
                   <div className="text-sm text-slate-600 border bg-white/80 px-3 py-2 rounded-xl">
-                    Loading graves/plots on the map…
+                    Loading graves and plots on the map...
                   </div>
                 )}
 
@@ -2011,6 +2043,15 @@ export default function SearchForDeceased() {
 
                 {/* Controls */}
                 <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => requestUserLocation({ auto: false })}
+                    disabled={isRequestingLoc}
+                    className="rounded-xl"
+                  >
+                    Enable Live Location
+                  </Button>
+
                   <Button variant="outline" onClick={fitCemetery} className="rounded-xl">
                     Fit Cemetery
                   </Button>
@@ -2053,6 +2094,7 @@ export default function SearchForDeceased() {
                     showLegend={false}
                     showGeofence={false}
                     showInitialRoads={false}
+                    restrictToCemeteryBounds={restrictToCemeteryBounds}
                     polygons={[...amenityPolygons, ...plotPolygons]}
                     // ✅ If no grave pinned yet, center on your GPS when available
                     center={mapCoords || userLocation || CEMETERY_CENTER}
@@ -2069,8 +2111,8 @@ export default function SearchForDeceased() {
                     <div className="text-sm text-slate-600 mt-1">
                       The map already shows <span className="font-semibold">all graves</span>{" "}
                       plus <span className="font-semibold">comfort rooms</span> and{" "}
-                      <span className="font-semibold">parking</span>. Use Search or QR to
-                      pin a grave and generate directions.
+                      <span className="font-semibold">parking</span>. Use Search or QR to pin a
+                      grave and generate directions.
                     </div>
                   </div>
                 )}
@@ -2153,7 +2195,7 @@ export default function SearchForDeceased() {
                     <div>
                       <div className="text-slate-500">Deceased Name</div>
                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-800 break-words shadow-sm">
-                        {getSearchName(selected || scanResult?.matchedRow) || "—"}
+                        {getSearchName(selected || scanResult?.matchedRow) || "N/A"}
                       </div>
                     </div>
 
@@ -2175,7 +2217,7 @@ export default function SearchForDeceased() {
                     <div>
                       <div className="text-slate-500">Plot</div>
                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-800 shadow-sm">
-                        {(selected || scanResult?.matchedRow)?.plot_id ?? "—"}
+                        {(selected || scanResult?.matchedRow)?.plot_id ?? "N/A"}
                       </div>
                     </div>
                   </div>
@@ -2230,14 +2272,11 @@ export default function SearchForDeceased() {
         open={scanModalOpen}
         onOpenChange={(o) => (o ? setScanModalOpen(true) : closeScanModal())}
       >
-        <DialogContent
-          className="sm:max-w-2xl rounded-2xl"
-          onInteractOutside={(e) => e.preventDefault()}
-        >
+        <DialogContent className="sm:max-w-2xl rounded-2xl" onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>QR Scanner</DialogTitle>
             <DialogDescription>
-              Point your camera at the QR code. We’ll auto-detect it and pin the grave on the map.
+              Point your camera at the QR code. We will auto detect it and pin the grave on the map.
             </DialogDescription>
           </DialogHeader>
 
@@ -2245,13 +2284,7 @@ export default function SearchForDeceased() {
             <div className="space-y-3">
               <div className="rounded-xl overflow-hidden border">
                 <div className="w-full aspect-video bg-muted/40">
-                  <video
-                    ref={videoRef}
-                    className="w-full h-full object-cover"
-                    muted
-                    playsInline
-                    autoPlay
-                  />
+                  <video ref={videoRef} className="w-full h-full object-cover" muted playsInline autoPlay />
                 </div>
               </div>
 
@@ -2279,8 +2312,7 @@ export default function SearchForDeceased() {
 
           {scanMode === "upload" && (
             <div className="text-sm text-slate-600">
-              Processing image…{" "}
-              {scanErr && <span className="text-rose-600 font-medium ml-2">{scanErr}</span>}
+              Processing image... {scanErr && <span className="text-rose-600 font-medium ml-2">{scanErr}</span>}
             </div>
           )}
 
@@ -2313,16 +2345,12 @@ export default function SearchForDeceased() {
           }
         }}
       >
-        <DialogContent
-          className="sm:max-w-md rounded-2xl"
-          onInteractOutside={(e) => e.preventDefault()}
-        >
+        <DialogContent className="sm:max-w-md rounded-2xl" onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Use Your Location?</DialogTitle>
             <DialogDescription>
-              If you allow location access, we’ll try to start the route from where you are.
-              If you are far from the cemetery, routing may start from the cemetery entrance (but
-              your GPS can still be acquired).
+              If you allow location access, we will try to start the route from where you are.
+              If you are far from the cemetery, routing may start from the cemetery entrance (but your GPS can still be acquired).
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
