@@ -40,6 +40,7 @@ import {
   ShieldCheck,
   XCircle,
   Sparkles,
+  Users, // ✅ added
 } from "lucide-react";
 
 // ✅ Map
@@ -80,9 +81,7 @@ async function fetchFirstOk(urls, options) {
       // allow fallback to other endpoints
       if (res.status === 404) {
         lastErr = new Error(
-          typeof body === "string"
-            ? body
-            : body?.message || body?.error || `404 ${url}`
+          typeof body === "string" ? body : body?.message || body?.error || `404 ${url}`
         );
         continue;
       }
@@ -102,6 +101,7 @@ async function fetchFirstOk(urls, options) {
 
 /* --------------------------- small helpers --------------------------- */
 const safeLower = (v) => String(v || "").toLowerCase();
+const nameKey = (v) => String(v || "").trim().toLowerCase();
 
 function extractArray(body) {
   if (Array.isArray(body)) return body;
@@ -118,27 +118,18 @@ const fmtDateLong = (s) => {
   if (!s) return "—";
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return String(s);
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 };
 
 const statusPill = (statusRaw) => {
   const s = safeLower(statusRaw);
-  const base =
-    "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium border";
-  if (s === "completed")
-    return `${base} bg-emerald-600 text-white border-emerald-600`;
-  if (s === "scheduled")
-    return `${base} bg-sky-600 text-white border-sky-600`;
-  if (s === "approved")
-    return `${base} bg-emerald-600 text-white border-emerald-600`;
+  const base = "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium border";
+  if (s === "completed") return `${base} bg-emerald-600 text-white border-emerald-600`;
+  if (s === "scheduled") return `${base} bg-sky-600 text-white border-sky-600`;
+  if (s === "approved") return `${base} bg-emerald-600 text-white border-emerald-600`;
   if (s === "cancelled" || s === "canceled" || s === "rejected")
     return `${base} bg-rose-600 text-white border-rose-600`;
-  if (s === "reschedule_requested")
-    return `${base} bg-amber-500 text-white border-amber-500`;
+  if (s === "reschedule_requested") return `${base} bg-amber-500 text-white border-amber-500`;
   return `${base} bg-slate-600 text-white border-slate-600`;
 };
 
@@ -147,8 +138,7 @@ const statusAccent = (statusRaw) => {
   if (s === "completed") return "border-l-emerald-500";
   if (s === "scheduled") return "border-l-sky-500";
   if (s === "approved") return "border-l-emerald-500";
-  if (s === "cancelled" || s === "canceled" || s === "rejected")
-    return "border-l-rose-500";
+  if (s === "cancelled" || s === "canceled" || s === "rejected") return "border-l-rose-500";
   if (s === "reschedule_requested") return "border-l-amber-500";
   return "border-l-slate-400";
 };
@@ -163,20 +153,51 @@ const ratingLabel = (n) => {
   return "";
 };
 
-const getRowPlotId = (r) =>
-  r?.plot_id ?? r?.plotId ?? r?.grave_plot_id ?? r?.plot?.id ?? r?.plot ?? null;
-
-const normId = (v) => {
-  if (v == null) return "";
-  return String(v).trim();
-};
+const normId = (v) => (v == null ? "" : String(v).trim());
 const idEq = (a, b) => {
   const A = normId(a);
   const B = normId(b);
   return !!A && !!B && A === B;
 };
 
-const isTruthyStr = (v) => v != null && String(v).trim() !== "";
+/** ✅ Robustly extract plot id from *any* backend shape */
+function extractPlotIdAny(r) {
+  const candidates = [
+    r?.plot_id,
+    r?.plotId,
+    r?.plotID,
+    r?.plotid,
+    r?.plot_no,
+    r?.plotNo,
+    r?.plot_number,
+    r?.plotNumber,
+
+    r?.grave_plot_id,
+    r?.gravePlotId,
+    r?.grave_plot?.id,
+    r?.grave_plot?.plot_id,
+    r?.grave_plot?.plotId,
+
+    r?.plot?.id,
+    r?.plot?.plot_id,
+    r?.plot?.plotId,
+    r?.plot?.plotID,
+
+    r?.reservation?.plot_id,
+    r?.reservation?.plotId,
+    r?.reservation?.plot?.id,
+    r?.reservation?.plot?.plot_id,
+    r?.reservation?.plot?.plotId,
+  ];
+
+  for (const c of candidates) {
+    const s = String(c ?? "").trim();
+    if (s) return s;
+  }
+  return null;
+}
+
+const getRowPlotId = (r) => extractPlotIdAny(r);
 
 /* -------------------- GeoJSON ➜ CemeteryMap helpers -------------------- */
 const DEFAULT_PLOT_STYLE = {
@@ -199,6 +220,8 @@ function getFeatId(feature) {
     ? String(p.plot_id)
     : p.plotId != null
     ? String(p.plotId)
+    : p.plotID != null
+    ? String(p.plotID)
     : p.id != null
     ? String(p.id)
     : p.uid != null
@@ -216,6 +239,7 @@ function featureMatchesHighlighted(feature, highlightedId) {
     idEq(fid, highlightedId) ||
     idEq(p.plot_id, highlightedId) ||
     idEq(p.plotId, highlightedId) ||
+    idEq(p.plotID, highlightedId) ||
     idEq(p.id, highlightedId) ||
     idEq(p.uid, highlightedId)
   );
@@ -277,10 +301,7 @@ function featureToMapShapes(feature, highlightedId) {
   if (type === "Polygon") {
     const rings = Array.isArray(coords) ? coords : [];
     if (rings[0])
-      pushPolygonFromRing(
-        rings[0],
-        fid || `poly-${Math.random().toString(36).slice(2)}`
-      );
+      pushPolygonFromRing(rings[0], fid || `poly-${Math.random().toString(36).slice(2)}`);
     return out;
   }
 
@@ -330,6 +351,23 @@ function getTodayYMD() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+/* -------------------- date clamp helpers (YYYY-MM-DD) -------------------- */
+function clampToMaxYMD(v, maxYMD) {
+  if (!v) return "";
+  if (!maxYMD) return v;
+  return v > maxYMD ? maxYMD : v;
+}
+function clampToMinYMD(v, minYMD) {
+  if (!v) return "";
+  if (!minYMD) return v;
+  return v < minYMD ? minYMD : v;
+}
+function preventMouseWheelDateChange(e) {
+  // Stops "scroll to advance date" behavior
+  e.preventDefault?.();
+  e.currentTarget?.blur?.();
+}
+
 /* =======================================================================
    PAGE
 ======================================================================= */
@@ -343,10 +381,7 @@ export default function Inquire() {
   const role = String(currentUser?.role || "").toLowerCase();
   const isVisitorLoggedIn = !!token && role === "visitor" && !!currentUser?.id;
 
-  const headersAuth = useMemo(
-    () => (token ? { Authorization: `Bearer ${token}` } : {}),
-    [token]
-  );
+  const headersAuth = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : {}), [token]);
 
   const todayYMD = useMemo(() => getTodayYMD(), []);
 
@@ -365,8 +400,11 @@ export default function Inquire() {
   const deceasedNameToPlotId = useMemo(() => {
     const map = new Map();
     deceasedOptions.forEach((o) => {
-      if (o?.name && o?.plot_id != null)
-        map.set(String(o.name).toLowerCase(), String(o.plot_id));
+      const nm = String(o?.name || "").trim();
+      const pid = o?.plot_id;
+      if (nm && pid != null && String(pid).trim()) {
+        map.set(nameKey(nm), String(pid));
+      }
     });
     return map;
   }, [deceasedOptions]);
@@ -380,6 +418,12 @@ export default function Inquire() {
 
   // ✅ from Reservation -> Inquire (prefill)
   const [prefillReservationId, setPrefillReservationId] = useState(null);
+
+  // ✅ Linked Plot source:
+  // - manualPlotId: user clicks on map (always wins)
+  // - autoPlotId: derived from selected/typed deceased (best effort)
+  const [manualPlotId, setManualPlotId] = useState(null);
+  const [autoPlotId, setAutoPlotId] = useState(null);
 
   // maintenance form
   const [maintenanceForm, setMaintenanceForm] = useState({
@@ -395,6 +439,15 @@ export default function Inquire() {
     deathDate: "",
     burialDate: "",
   });
+
+  // ✅ make sure birth/death can NEVER advance to the future
+  const birthMaxYMD = useMemo(() => {
+    const d = burialForm.deathDate;
+    if (d && d < todayYMD) return d;
+    return todayYMD;
+  }, [burialForm.deathDate, todayYMD]);
+
+  const deathMinYMD = useMemo(() => burialForm.birthDate || "", [burialForm.birthDate]);
 
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState({ type: "", text: "" });
@@ -412,7 +465,6 @@ export default function Inquire() {
   // ✅ map
   const [fc, setFc] = useState(null);
   const [mapRef, setMapRef] = useState(null);
-  const [manualPlotId, setManualPlotId] = useState(null);
 
   // scroll-to-map UX
   const mapSectionRef = useRef(null);
@@ -431,9 +483,7 @@ export default function Inquire() {
         setNamesError("");
 
         const urls = [
-          `${API_BASE}/visitor/my-deceased-names/${encodeURIComponent(
-            String(currentUser.id)
-          )}`,
+          `${API_BASE}/visitor/my-deceased-names/${encodeURIComponent(String(currentUser.id))}`,
         ];
 
         const { body } = await fetchFirstOk(urls, { headers: headersAuth });
@@ -441,18 +491,20 @@ export default function Inquire() {
 
         const opts = list
           .map((r) => {
-            const name = String(r?.deceased_name ?? "").trim();
+            const name = String(
+              r?.deceased_name ?? r?.deceasedName ?? r?.name ?? r?.full_name ?? ""
+            ).trim();
             if (!name) return null;
-            const pid = r?.plot_id ?? r?.plotId ?? r?.grave_plot_id ?? null;
-            return { name, plot_id: pid != null ? String(pid) : null };
+
+            const pid = extractPlotIdAny(r);
+            return { name, plot_id: pid };
           })
           .filter(Boolean)
           .sort((a, b) => a.name.localeCompare(b.name));
 
         if (!cancelled) setDeceasedOptions(opts);
       } catch (err) {
-        if (!cancelled)
-          setNamesError(err.message || "Failed to load deceased names.");
+        if (!cancelled) setNamesError(err.message || "Failed to load deceased names.");
       } finally {
         if (!cancelled) setNamesLoading(false);
       }
@@ -463,6 +515,20 @@ export default function Inquire() {
     };
   }, [headersAuth, isVisitorLoggedIn, currentUser.id]);
 
+  /* -------------------- Keep autoPlotId in sync with typed/selected deceased name -------------------- */
+  useEffect(() => {
+    if (manualPlotId) return;
+
+    const key = nameKey(deceasedName);
+    if (!key) {
+      setAutoPlotId(null);
+      return;
+    }
+
+    const pid = deceasedNameToPlotId.get(key) || null;
+    setAutoPlotId(pid);
+  }, [deceasedName, deceasedNameToPlotId, manualPlotId]);
+
   /* -------------------- Load maintenance schedule -------------------- */
   const loadMySchedule = useCallback(async () => {
     if (!isVisitorLoggedIn) return;
@@ -472,9 +538,7 @@ export default function Inquire() {
       setScheduleError("");
 
       const urls = [
-        `${API_BASE}/visitor/my-maintenance-schedule/${encodeURIComponent(
-          String(currentUser.id)
-        )}`,
+        `${API_BASE}/visitor/my-maintenance-schedule/${encodeURIComponent(String(currentUser.id))}`,
       ];
 
       const { body } = await fetchFirstOk(urls, { headers: headersAuth });
@@ -500,12 +564,8 @@ export default function Inquire() {
       setBurialError("");
 
       const urls = [
-        `${API_BASE}/visitor/my-burial-requests/${encodeURIComponent(
-          String(currentUser.id)
-        )}`,
-        `${API_BASE}/visitor/burial-requests/${encodeURIComponent(
-          String(currentUser.id)
-        )}`,
+        `${API_BASE}/visitor/my-burial-requests/${encodeURIComponent(String(currentUser.id))}`,
+        `${API_BASE}/visitor/burial-requests/${encodeURIComponent(String(currentUser.id))}`,
       ];
 
       const { body } = await fetchFirstOk(urls, { headers: headersAuth });
@@ -543,9 +603,9 @@ export default function Inquire() {
     if (typeof window === "undefined") return;
 
     const sp = new URLSearchParams(window.location.search);
-    const qpPlot = sp.get("plot_id");
-    const qpRes = sp.get("reservation_id");
-    const qpName = sp.get("deceased_name");
+    const qpPlot = sp.get("plot_id") || sp.get("plotId") || sp.get("plotID");
+    const qpRes = sp.get("reservation_id") || sp.get("reservationId");
+    const qpName = sp.get("deceased_name") || sp.get("deceasedName");
 
     let used = false;
 
@@ -563,7 +623,6 @@ export default function Inquire() {
       used = true;
     }
 
-    // if we were sent from reservation, switch to burial
     if (used && (qpRes || qpPlot)) {
       setRequestType("burial");
       return;
@@ -574,14 +633,20 @@ export default function Inquire() {
       if (!raw) return;
 
       const j = JSON.parse(raw);
-      if (j?.plot_id != null) setManualPlotId(String(j.plot_id));
-      if (j?.id != null) setPrefillReservationId(String(j.id));
-      if (j?.deceased_name) {
-        setDeceasedName(String(j.deceased_name));
-        setSelectedName(String(j.deceased_name));
+
+      const pid = extractPlotIdAny(j);
+      if (pid != null) setManualPlotId(String(pid));
+
+      const rid = j?.id ?? j?.reservation_id ?? j?.reservationId ?? j?.reservation?.id ?? null;
+      if (rid != null) setPrefillReservationId(String(rid));
+
+      const dn = j?.deceased_name ?? j?.deceasedName ?? j?.deceased?.name ?? null;
+      if (dn) {
+        setDeceasedName(String(dn));
+        setSelectedName(String(dn));
       }
 
-      if (j?.plot_id != null || j?.id != null) {
+      if (pid != null || rid != null) {
         setRequestType("burial");
       }
     } catch {
@@ -589,27 +654,15 @@ export default function Inquire() {
     }
   }, []);
 
-  /* -------------------- Plot highlight selection -------------------- */
-  const plotIdFromSelectedDeceased = useMemo(() => {
-    const key = String(deceasedName || "").trim().toLowerCase();
-    if (!key) return null;
-    const pid = deceasedNameToPlotId.get(key);
-    return pid != null ? String(pid) : null;
-  }, [deceasedNameToPlotId, deceasedName]);
+  /* -------------------- Plot selection (final linked plot) -------------------- */
+  const linkedPlotId = useMemo(() => manualPlotId || autoPlotId || null, [manualPlotId, autoPlotId]);
 
-  const highlightedPlotId = useMemo(() => {
-    return manualPlotId || plotIdFromSelectedDeceased || null;
-  }, [manualPlotId, plotIdFromSelectedDeceased]);
+  const highlightedPlotId = linkedPlotId;
 
-  const mapShapes = useMemo(
-    () => fcToMapShapes(fc, highlightedPlotId),
-    [fc, highlightedPlotId]
-  );
+  const mapShapes = useMemo(() => fcToMapShapes(fc, highlightedPlotId), [fc, highlightedPlotId]);
 
-  // ✅ Burial must have a plot_id (from deceased mapping OR manual plot selection)
-  const linkedPlotIdForBurial = useMemo(() => {
-    return plotIdFromSelectedDeceased || manualPlotId || null;
-  }, [plotIdFromSelectedDeceased, manualPlotId]);
+  // ✅ Burial must have a plot_id (from linkedPlotId)
+  const linkedPlotIdForBurial = linkedPlotId;
 
   // ✅ zoom to highlighted plot (polygons first, else marker)
   useEffect(() => {
@@ -622,6 +675,7 @@ export default function Inquire() {
       return (
         idEq(pr.plot_id, highlightedPlotId) ||
         idEq(pr.plotId, highlightedPlotId) ||
+        idEq(pr.plotID, highlightedPlotId) ||
         idEq(pr.id, highlightedPlotId) ||
         idEq(pr.uid, highlightedPlotId)
       );
@@ -659,16 +713,12 @@ export default function Inquire() {
     setSubmitting(true);
     try {
       if (requestType === "maintenance") {
-        // ✅ MAINTENANCE
         if (!String(maintenanceForm.description || "").trim()) {
           setMsg({ type: "error", text: "Description is required." });
           return;
         }
         if (!maintenanceForm.preferredDate || !maintenanceForm.preferredTime) {
-          setMsg({
-            type: "error",
-            text: "Preferred date and time are required.",
-          });
+          setMsg({ type: "error", text: "Preferred date and time are required." });
           return;
         }
 
@@ -689,13 +739,9 @@ export default function Inquire() {
         });
 
         const data = await res.json().catch(() => ({}));
-        if (!res.ok)
-          throw new Error(data?.message || `Request failed: ${res.status}`);
+        if (!res.ok) throw new Error(data?.message || `Request failed: ${res.status}`);
 
-        setMsg({
-          type: "ok",
-          text: "Maintenance request submitted successfully!",
-        });
+        setMsg({ type: "ok", text: "Maintenance request submitted successfully!" });
 
         setMaintenanceForm({
           description: "",
@@ -706,7 +752,6 @@ export default function Inquire() {
 
         await loadMySchedule();
       } else {
-        // ✅ BURIAL REQUEST
         if (!burialForm.birthDate || !burialForm.deathDate || !burialForm.burialDate) {
           setMsg({
             type: "error",
@@ -715,7 +760,6 @@ export default function Inquire() {
           return;
         }
 
-        // ✅ prevent future birth/death
         if (burialForm.birthDate > todayYMD) {
           setMsg({ type: "error", text: "Birth date cannot be in the future." });
           return;
@@ -725,13 +769,12 @@ export default function Inquire() {
           return;
         }
 
-        if (burialForm.birthDate && burialForm.deathDate && burialForm.deathDate < burialForm.birthDate) {
+        if (burialForm.deathDate < burialForm.birthDate) {
           setMsg({ type: "error", text: "Death date cannot be earlier than birth date." });
           return;
         }
 
-        // optional sanity check
-        if (burialForm.deathDate && burialForm.burialDate && burialForm.burialDate < burialForm.deathDate) {
+        if (burialForm.burialDate < burialForm.deathDate) {
           setMsg({ type: "error", text: "Burial date cannot be earlier than death date." });
           return;
         }
@@ -741,7 +784,7 @@ export default function Inquire() {
           setMsg({
             type: "error",
             text:
-              "To submit a burial schedule request, you must have a linked plot. Please reserve a plot first (Reservation page) or select a deceased name with an assigned plot.",
+              "To submit a burial schedule request, you must have a linked plot. Please reserve a plot first (Reservation page), select a deceased name with an assigned plot, or click a plot on the map.",
           });
           return;
         }
@@ -756,10 +799,7 @@ export default function Inquire() {
           ...(prefillReservationId ? { reservation_id: String(prefillReservationId) } : {}),
         };
 
-        const urls = [
-          `${API_BASE}/visitor/request-burial`,
-          `${API_BASE}/visitor/burial-request`,
-        ];
+        const urls = [`${API_BASE}/visitor/request-burial`, `${API_BASE}/visitor/burial-request`];
 
         await fetchFirstOk(urls, {
           method: "POST",
@@ -778,12 +818,9 @@ export default function Inquire() {
         await loadMyBurialRequests();
       }
 
-      // keep dropdown containing typed name (optional)
       setDeceasedOptions((prev) => {
         if (prev.some((n) => safeLower(n.name) === safeLower(dn))) return prev;
-        return [...prev, { name: dn, plot_id: null }].sort((a, b) =>
-          a.name.localeCompare(b.name)
-        );
+        return [...prev, { name: dn, plot_id: null }].sort((a, b) => a.name.localeCompare(b.name));
       });
     } catch (err) {
       setMsg({ type: "error", text: err.message || "Failed to submit request." });
@@ -805,9 +842,7 @@ export default function Inquire() {
     try {
       setMsg({ type: "", text: "" });
 
-      const url = `${API_BASE}/visitor/maintenance/${encodeURIComponent(
-        String(id)
-      )}/request-reschedule`;
+      const url = `${API_BASE}/visitor/maintenance/${encodeURIComponent(String(id))}/request-reschedule`;
 
       const res = await fetch(url, {
         method: "PATCH",
@@ -816,8 +851,7 @@ export default function Inquire() {
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok)
-        throw new Error(data?.message || "Failed to request reschedule");
+      if (!res.ok) throw new Error(data?.message || "Failed to request reschedule");
 
       setMsg({ type: "ok", text: "Reschedule requested." });
       await loadMySchedule();
@@ -885,9 +919,7 @@ export default function Inquire() {
       setSendingFeedback(true);
       setMsg({ type: "", text: "" });
 
-      const url = `${API_BASE}/visitor/maintenance/${encodeURIComponent(
-        String(id)
-      )}/feedback`;
+      const url = `${API_BASE}/visitor/maintenance/${encodeURIComponent(String(id))}/feedback`;
 
       const payload = {
         rating: Number(rating),
@@ -916,27 +948,20 @@ export default function Inquire() {
   /* -------------------- UI summary -------------------- */
   const maintenancePending = useMemo(
     () =>
-      mySchedule.filter(
-        (r) =>
-          !["completed", "cancelled", "canceled"].includes(safeLower(r.status))
-      ).length,
+      mySchedule.filter((r) => !["completed", "cancelled", "canceled"].includes(safeLower(r.status)))
+        .length,
     [mySchedule]
   );
 
   const burialPending = useMemo(
     () =>
       myBurialRequests.filter(
-        (r) =>
-          !["completed", "cancelled", "canceled", "rejected"].includes(
-            safeLower(r.status)
-          )
+        (r) => !["completed", "cancelled", "canceled", "rejected"].includes(safeLower(r.status))
       ).length,
     [myBurialRequests]
   );
 
-  const displayName = `${currentUser.first_name || ""} ${
-    currentUser.last_name || ""
-  }`.trim();
+  const displayName = `${currentUser.first_name || ""} ${currentUser.last_name || ""}`.trim();
 
   return (
     <div className="relative min-h-screen font-poppins py-10 px-4">
@@ -964,10 +989,9 @@ export default function Inquire() {
                 </h1>
 
                 <p className="text-sm md:text-base text-slate-600 max-w-2xl">
-                  Submit a{" "}
-                  <span className="font-medium text-slate-800">Maintenance</span>{" "}
-                  or <span className="font-medium text-slate-800">Burial</span>{" "}
-                  request, track status, and view linked plots on the map.
+                  Submit a <span className="font-medium text-slate-800">Maintenance</span> or{" "}
+                  <span className="font-medium text-slate-800">Burial</span> request, track status,
+                  and view linked plots on the map.
                 </p>
               </div>
 
@@ -980,15 +1004,11 @@ export default function Inquire() {
                 </div>
                 <div className="rounded-xl border bg-white/70 p-3 shadow-sm">
                   <div className="text-xs text-slate-500">Maintenance (open)</div>
-                  <div className="mt-1 text-2xl font-bold text-slate-900">
-                    {maintenancePending}
-                  </div>
+                  <div className="mt-1 text-2xl font-bold text-slate-900">{maintenancePending}</div>
                 </div>
                 <div className="rounded-xl border bg-white/70 p-3 shadow-sm col-span-2 md:col-span-1">
                   <div className="text-xs text-slate-500">Burial (open)</div>
-                  <div className="mt-1 text-2xl font-bold text-slate-900">
-                    {burialPending}
-                  </div>
+                  <div className="mt-1 text-2xl font-bold text-slate-900">{burialPending}</div>
                 </div>
               </div>
             </div>
@@ -996,13 +1016,8 @@ export default function Inquire() {
         </Card>
 
         {!isVisitorLoggedIn && (
-          <Alert
-            className="bg-rose-50/90 backdrop-blur border-rose-200 shadow-md"
-            variant="destructive"
-          >
-            <AlertDescription className="text-rose-700">
-              Please login to submit a request.
-            </AlertDescription>
+          <Alert className="bg-rose-50/90 backdrop-blur border-rose-200 shadow-md" variant="destructive">
+            <AlertDescription className="text-rose-700">Please login to submit a request.</AlertDescription>
           </Alert>
         )}
 
@@ -1015,9 +1030,7 @@ export default function Inquire() {
                 : "bg-emerald-50/90 backdrop-blur border-emerald-200 shadow-md"
             }
           >
-            <AlertDescription
-              className={msg.type === "error" ? "text-rose-700" : "text-emerald-700"}
-            >
+            <AlertDescription className={msg.type === "error" ? "text-rose-700" : "text-emerald-700"}>
               {msg.text}
             </AlertDescription>
           </Alert>
@@ -1080,6 +1093,11 @@ export default function Inquire() {
                     onValueChange={(val) => {
                       setSelectedName(val);
                       setDeceasedName(val);
+
+                      const key = nameKey(val);
+                      const pid = deceasedNameToPlotId.get(key) || null;
+                      setAutoPlotId(pid);
+
                       setManualPlotId(null);
                       setPrefillReservationId(null);
                     }}
@@ -1116,9 +1134,9 @@ export default function Inquire() {
                     type="text"
                     value={deceasedName}
                     onChange={(e) => {
-                      setDeceasedName(e.target.value);
+                      const v = e.target.value || "";
+                      setDeceasedName(v);
                       setSelectedName("");
-                      setManualPlotId(null);
                       setPrefillReservationId(null);
                     }}
                     placeholder="Or type full name"
@@ -1131,20 +1149,37 @@ export default function Inquire() {
                     <MapPin className="h-3.5 w-3.5" />
                     <span>
                       Linked plot:{" "}
-                      <span className="font-semibold">
-                        {plotIdFromSelectedDeceased
-                          ? `#${plotIdFromSelectedDeceased}`
-                          : manualPlotId
-                          ? `#${manualPlotId}`
-                          : "—"}
-                      </span>
+                      <span className="font-semibold">{linkedPlotId ? `#${linkedPlotId}` : "—"}</span>
                       {prefillReservationId ? (
-                        <span className="ml-2 text-slate-500">
-                          (Reservation #{prefillReservationId})
-                        </span>
+                        <span className="ml-2 text-slate-500">(Reservation #{prefillReservationId})</span>
                       ) : null}
                     </span>
                   </div>
+
+                  {/* ✅ NEW: Button to open "Add Relative" aside in Reservation page */}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button asChild variant="outline" className="gap-2">
+                      <NavLink to="/visitor/reservation">
+                        <MapPin className="h-4 w-4" />
+                        Reservation
+                      </NavLink>
+                    </Button>
+
+                    {/* If your Reservation page listens to `open=relative`, it can auto-open the relative aside. */}
+                    <Button asChild variant="secondary" className="gap-2">
+                      <NavLink to="/visitor/reservation?open=relative&returnTo=/visitor/inquire">
+                        <Users className="h-4 w-4" />
+                        Add Relative
+                      </NavLink>
+                    </Button>
+                  </div>
+
+                  {!linkedPlotId ? (
+                    <p className="text-[11px] text-slate-500">
+                      If you already reserved a plot, click it on the map to link it here, or make sure
+                      your backend endpoint returns the plot_id for your deceased names.
+                    </p>
+                  ) : null}
                 </div>
 
                 {/* Conditional fields */}
@@ -1156,10 +1191,7 @@ export default function Inquire() {
                         type="text"
                         value={maintenanceForm.description}
                         onChange={(e) =>
-                          setMaintenanceForm((f) => ({
-                            ...f,
-                            description: e.target.value,
-                          }))
+                          setMaintenanceForm((f) => ({ ...f, description: e.target.value }))
                         }
                         placeholder="e.g., Clean area, fix headstone, remove weeds"
                         disabled={!isVisitorLoggedIn || submitting}
@@ -1174,10 +1206,7 @@ export default function Inquire() {
                           type="date"
                           value={maintenanceForm.preferredDate}
                           onChange={(e) =>
-                            setMaintenanceForm((f) => ({
-                              ...f,
-                              preferredDate: e.target.value,
-                            }))
+                            setMaintenanceForm((f) => ({ ...f, preferredDate: e.target.value }))
                           }
                           disabled={!isVisitorLoggedIn || submitting}
                           className="bg-white/70"
@@ -1190,10 +1219,7 @@ export default function Inquire() {
                           type="time"
                           value={maintenanceForm.preferredTime}
                           onChange={(e) =>
-                            setMaintenanceForm((f) => ({
-                              ...f,
-                              preferredTime: e.target.value,
-                            }))
+                            setMaintenanceForm((f) => ({ ...f, preferredTime: e.target.value }))
                           }
                           disabled={!isVisitorLoggedIn || submitting}
                           className="bg-white/70"
@@ -1204,9 +1230,7 @@ export default function Inquire() {
                         <Label>Priority</Label>
                         <Select
                           value={maintenanceForm.priority}
-                          onValueChange={(val) =>
-                            setMaintenanceForm((f) => ({ ...f, priority: val }))
-                          }
+                          onValueChange={(val) => setMaintenanceForm((f) => ({ ...f, priority: val }))}
                           disabled={!isVisitorLoggedIn || submitting}
                         >
                           <SelectTrigger className="bg-white/70">
@@ -1234,13 +1258,17 @@ export default function Inquire() {
                         <Input
                           type="date"
                           value={burialForm.birthDate}
-                          max={todayYMD}
+                          max={birthMaxYMD}
+                          onWheel={preventMouseWheelDateChange}
                           onChange={(e) => {
-                            const v = e.target.value || "";
-                            setBurialForm((f) => ({
-                              ...f,
-                              birthDate: v && v > todayYMD ? todayYMD : v,
-                            }));
+                            const raw = e.target.value || "";
+                            const v = clampToMaxYMD(raw, birthMaxYMD);
+
+                            setBurialForm((f) => {
+                              const next = { ...f, birthDate: v };
+                              if (next.deathDate && v && next.deathDate < v) next.deathDate = v;
+                              return next;
+                            });
                           }}
                           disabled={!isVisitorLoggedIn || submitting}
                           className="bg-white/70"
@@ -1252,13 +1280,14 @@ export default function Inquire() {
                         <Input
                           type="date"
                           value={burialForm.deathDate}
+                          min={deathMinYMD}
                           max={todayYMD}
+                          onWheel={preventMouseWheelDateChange}
                           onChange={(e) => {
-                            const v = e.target.value || "";
-                            setBurialForm((f) => ({
-                              ...f,
-                              deathDate: v && v > todayYMD ? todayYMD : v,
-                            }));
+                            const raw = e.target.value || "";
+                            const v1 = clampToMaxYMD(raw, todayYMD);
+                            const v2 = clampToMinYMD(v1, deathMinYMD);
+                            setBurialForm((f) => ({ ...f, deathDate: v2 }));
                           }}
                           disabled={!isVisitorLoggedIn || submitting}
                           className="bg-white/70"
@@ -1270,14 +1299,18 @@ export default function Inquire() {
                         <Input
                           type="date"
                           value={burialForm.burialDate}
-                          onChange={(e) =>
-                            setBurialForm((f) => ({ ...f, burialDate: e.target.value }))
-                          }
+                          onWheel={preventMouseWheelDateChange}
+                          onChange={(e) => setBurialForm((f) => ({ ...f, burialDate: e.target.value }))}
                           disabled={!isVisitorLoggedIn || submitting}
                           className="bg-white/70"
                         />
                       </div>
                     </div>
+
+                    <p className="text-[11px] text-slate-500">
+                      Birth/Death dates are locked to the past (no future dates). Death date also can’t be
+                      earlier than Birth date.
+                    </p>
                   </div>
                 )}
 
@@ -1291,7 +1324,7 @@ export default function Inquire() {
                 {requestType === "burial" && !linkedPlotIdForBurial ? (
                   <Alert className="bg-amber-50/90 backdrop-blur border-amber-200 shadow-md">
                     <AlertDescription className="text-amber-900">
-                      Burial requests require a linked plot. Please reserve a plot first.{" "}
+                      Burial requests require a linked plot. Please reserve a plot first or click a plot on the map.{" "}
                       <NavLink to="/visitor/reservation" className="underline font-semibold">
                         Go to Reservation
                       </NavLink>
@@ -1325,12 +1358,9 @@ export default function Inquire() {
             className="border-white/60 bg-white/80 backdrop-blur shadow-lg overflow-hidden"
           >
             <CardHeader className="pb-3">
-              <CardTitle className="text-xl font-bold text-slate-900">
-                Cemetery Map
-              </CardTitle>
+              <CardTitle className="text-xl font-bold text-slate-900">Cemetery Map</CardTitle>
               <CardDescription className="text-slate-600">
-                We highlight the plot linked to the selected deceased/request. Click a plot to
-                highlight it.
+                Click a plot to link/highlight it. Manual map selection will show immediately as “Linked plot”.
               </CardDescription>
             </CardHeader>
 
@@ -1338,30 +1368,17 @@ export default function Inquire() {
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary" className="bg-white/60 border">
                   Highlighted plot:{" "}
-                  <span className="ml-1 font-semibold">
-                    {highlightedPlotId ? `#${highlightedPlotId}` : "—"}
-                  </span>
+                  <span className="ml-1 font-semibold">{highlightedPlotId ? `#${highlightedPlotId}` : "—"}</span>
                 </Badge>
 
                 {highlightedPlotId ? (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setManualPlotId(String(highlightedPlotId));
-                      scrollToMap();
-                    }}
-                  >
+                  <Button variant="outline" onClick={scrollToMap}>
                     Focus
                   </Button>
                 ) : null}
 
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setManualPlotId(null);
-                  }}
-                >
-                  Clear highlight
+                <Button variant="outline" onClick={() => setManualPlotId(null)}>
+                  Clear manual selection
                 </Button>
               </div>
 
@@ -1379,24 +1396,30 @@ export default function Inquire() {
                   onEditPlot={(poly) => {
                     const pid =
                       poly?.featureId ??
+                      poly?.plotId ??
+                      poly?.plot_id ??
                       poly?.id ??
                       poly?.properties?.plot_id ??
                       poly?.properties?.plotId ??
+                      poly?.properties?.plotID ??
                       poly?.properties?.id ??
-                      poly?.properties?.uid;
-                    if (pid != null) setManualPlotId(String(pid));
+                      poly?.properties?.uid ??
+                      null;
+
+                    if (pid != null) {
+                      setManualPlotId(String(pid));
+                      setMsg({ type: "ok", text: `Plot #${String(pid)} linked from map.` });
+                    }
                   }}
                 />
               </div>
 
               <p className="text-xs text-slate-600">
-                Tip: Use <span className="font-medium">“View on map”</span> from a request to jump
-                directly to that plot.
+                Tip: If your deceased names endpoint doesn’t include plot_id, you can still link a plot by clicking on the map.
               </p>
 
               <p className="text-[11px] text-slate-500">
-                Debug: plots loaded = {fc?.features?.length || 0} • polygons rendered ={" "}
-                {mapShapes.polygons.length}
+                Debug: plots loaded = {fc?.features?.length || 0} • polygons rendered = {mapShapes.polygons.length}
               </p>
             </CardContent>
           </Card>
@@ -1405,9 +1428,7 @@ export default function Inquire() {
         {/* MY MAINTENANCE SCHEDULE */}
         <Card className="border-white/60 bg-white/80 backdrop-blur shadow-lg">
           <CardHeader>
-            <CardTitle className="text-xl font-bold text-slate-900">
-              My Maintenance Schedule
-            </CardTitle>
+            <CardTitle className="text-xl font-bold text-slate-900">My Maintenance Schedule</CardTitle>
             <CardDescription className="text-slate-600">
               Track requests, schedules, assigned staff, completion, and feedback.
             </CardDescription>
@@ -1446,9 +1467,7 @@ export default function Inquire() {
                             <div className="font-semibold text-slate-900 truncate">
                               {r.deceased_name || "Maintenance"}
                             </div>
-                            <span className={statusPill(r.status)}>
-                              {r.status || "pending"}
-                            </span>
+                            <span className={statusPill(r.status)}>{r.status || "pending"}</span>
                             {plotId != null ? (
                               <Badge variant="outline" className="text-slate-700 bg-white/50">
                                 Plot #{String(plotId)}
@@ -1456,9 +1475,7 @@ export default function Inquire() {
                             ) : null}
                           </div>
 
-                          <div className="text-sm text-slate-700 mt-2">
-                            {r.description || "—"}
-                          </div>
+                          <div className="text-sm text-slate-700 mt-2">{r.description || "—"}</div>
 
                           <Separator className="my-3" />
 
@@ -1483,8 +1500,7 @@ export default function Inquire() {
                               </div>
                               {r.assigned_staff_name ? (
                                 <div className="mt-1 text-slate-600">
-                                  Staff:{" "}
-                                  <span className="font-medium">{r.assigned_staff_name}</span>
+                                  Staff: <span className="font-medium">{r.assigned_staff_name}</span>
                                 </div>
                               ) : null}
                             </div>
@@ -1493,30 +1509,20 @@ export default function Inquire() {
                           {hasFeedback ? (
                             <div className="mt-3 rounded-xl border bg-white/60 p-3">
                               <div className="flex items-center gap-2 text-sm">
-                                <div className="font-medium text-slate-800">
-                                  Your rating
-                                </div>
+                                <div className="font-medium text-slate-800">Your rating</div>
                                 <div className="flex items-center gap-1">
                                   {[1, 2, 3, 4, 5].map((i) => (
                                     <Star
                                       key={i}
                                       className={
                                         "h-4 w-4 " +
-                                        (Number(r.feedback_rating) >= i
-                                          ? "text-amber-500"
-                                          : "text-slate-300")
+                                        (Number(r.feedback_rating) >= i ? "text-amber-500" : "text-slate-300")
                                       }
-                                      fill={
-                                        Number(r.feedback_rating) >= i
-                                          ? "currentColor"
-                                          : "none"
-                                      }
+                                      fill={Number(r.feedback_rating) >= i ? "currentColor" : "none"}
                                     />
                                   ))}
                                 </div>
-                                <span className="text-xs text-slate-600">
-                                  ({r.feedback_rating}/5)
-                                </span>
+                                <span className="text-xs text-slate-600">({r.feedback_rating}/5)</span>
                               </div>
                               {r.feedback_text ? (
                                 <div className="mt-2 text-sm text-slate-700">
@@ -1534,10 +1540,7 @@ export default function Inquire() {
                             className="gap-2"
                             onClick={() => {
                               if (plotId == null) {
-                                setMsg({
-                                  type: "error",
-                                  text: "No plot linked to this record yet.",
-                                });
+                                setMsg({ type: "error", text: "No plot linked to this record yet." });
                                 return;
                               }
                               setManualPlotId(String(plotId));
@@ -1581,9 +1584,7 @@ export default function Inquire() {
         {/* MY BURIAL REQUESTS */}
         <Card className="border-white/60 bg-white/80 backdrop-blur shadow-lg">
           <CardHeader>
-            <CardTitle className="text-xl font-bold text-slate-900">
-              My Burial Requests
-            </CardTitle>
+            <CardTitle className="text-xl font-bold text-slate-900">My Burial Requests</CardTitle>
             <CardDescription className="text-slate-600">
               View your submitted burial requests and their status.
             </CardDescription>
@@ -1602,7 +1603,6 @@ export default function Inquire() {
                 {myBurialRequests.map((r) => {
                   const status = safeLower(r.status);
                   const isCancelled = status === "cancelled" || status === "canceled";
-
                   const plotId = getRowPlotId(r);
 
                   return (
@@ -1619,9 +1619,7 @@ export default function Inquire() {
                             <div className="font-semibold text-slate-900 truncate">
                               {r.deceased_name || "Burial Request"}
                             </div>
-                            <span className={statusPill(r.status)}>
-                              {r.status || "pending"}
-                            </span>
+                            <span className={statusPill(r.status)}>{r.status || "pending"}</span>
 
                             {plotId != null ? (
                               <Badge variant="outline" className="text-slate-700 bg-white/50">
@@ -1653,17 +1651,9 @@ export default function Inquire() {
                             variant="outline"
                             className="gap-2"
                             onClick={() => {
-                              const nameKey = String(r.deceased_name || "")
-                                .trim()
-                                .toLowerCase();
-                              const mapped = deceasedNameToPlotId.get(nameKey);
-                              const pid = plotId ?? mapped ?? null;
-
+                              const pid = plotId || null;
                               if (!pid) {
-                                setMsg({
-                                  type: "error",
-                                  text: "No plot linked to this burial request yet.",
-                                });
+                                setMsg({ type: "error", text: "No plot linked to this burial request yet." });
                                 return;
                               }
                               setManualPlotId(String(pid));
@@ -1675,11 +1665,7 @@ export default function Inquire() {
                           </Button>
 
                           {!isCancelled && (
-                            <Button
-                              variant="secondary"
-                              onClick={() => cancelBurial(r.id)}
-                              className="gap-2"
-                            >
+                            <Button variant="secondary" onClick={() => cancelBurial(r.id)} className="gap-2">
                               <XCircle className="h-4 w-4" />
                               Cancel request
                             </Button>
@@ -1698,16 +1684,11 @@ export default function Inquire() {
       </div>
 
       {/* Feedback dialog */}
-      <Dialog
-        open={feedbackOpen}
-        onOpenChange={(o) => (!o ? closeFeedback() : setFeedbackOpen(true))}
-      >
+      <Dialog open={feedbackOpen} onOpenChange={(o) => (!o ? closeFeedback() : setFeedbackOpen(true))}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Rate the service</DialogTitle>
-            <DialogDescription>
-              Share your experience so we can keep improving.
-            </DialogDescription>
+            <DialogDescription>Share your experience so we can keep improving.</DialogDescription>
           </DialogHeader>
 
           {feedbackTarget ? (
@@ -1716,9 +1697,7 @@ export default function Inquire() {
                 <div className="text-sm font-medium text-slate-900">
                   {feedbackTarget.deceased_name || "Maintenance"}
                 </div>
-                <div className="text-xs text-slate-600 mt-1">
-                  Request #{feedbackTarget.id}
-                </div>
+                <div className="text-xs text-slate-600 mt-1">Request #{feedbackTarget.id}</div>
               </div>
 
               <div className="space-y-2">
@@ -1734,9 +1713,7 @@ export default function Inquire() {
                         aria-label={`Rate ${i} out of 5`}
                       >
                         <Star
-                          className={
-                            "h-6 w-6 " + (rating >= i ? "text-amber-500" : "text-slate-300")
-                          }
+                          className={"h-6 w-6 " + (rating >= i ? "text-amber-500" : "text-slate-300")}
                           fill={rating >= i ? "currentColor" : "none"}
                         />
                       </button>
@@ -1759,9 +1736,7 @@ export default function Inquire() {
                 <Label>Feedback (optional)</Label>
                 <textarea
                   value={feedbackText}
-                  onChange={(e) =>
-                    setFeedbackText(String(e.target.value || "").slice(0, 300))
-                  }
+                  onChange={(e) => setFeedbackText(String(e.target.value || "").slice(0, 300))}
                   placeholder="Tell us what went well, or what we can improve…"
                   className="min-h-[110px] w-full rounded-md border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-300"
                 />
