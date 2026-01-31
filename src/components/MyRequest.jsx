@@ -2,20 +2,8 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 
 import { Button } from "./ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "./ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
@@ -35,9 +23,18 @@ import {
   MessageSquareText,
 } from "lucide-react";
 
-const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) ||
-  "";
+/**
+ * IMPORTANT:
+ * - Your backend is mounted under /api (e.g. /api/visitor/...)
+ * - Some dev setups use VITE_API_BASE_URL like:
+ *   - "/api"
+ *   - "http://localhost:5000/api"
+ *   - "http://localhost:5000"  (missing /api)
+ *
+ * This component tries multiple base candidates so it works in all cases.
+ */
+const RAW_API_BASE =
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "";
 
 /* --------------------------- auth helpers --------------------------- */
 function readAuth() {
@@ -56,7 +53,7 @@ function getToken(auth) {
 }
 
 function getUserId(auth) {
-  // backend expects visitor user id for :family_contact or requester
+  // backend expects visitor user id for :family_contact
   return auth?.user?.id ?? auth?.user?.user_id ?? null;
 }
 
@@ -96,8 +93,8 @@ async function fetchFirstOk(urls, options) {
 
 /* --------------------------- endpoints --------------------------- */
 /**
- * These are "candidate" paths because your backend evolved over time.
- * The script will try each until it finds one that returns 200.
+ * These are "candidate" paths because backend routes can differ between versions.
+ * We'll try each until it finds one that returns 200.
  */
 const PATHS = {
   burialList: (userId) => [
@@ -155,12 +152,40 @@ function pickPlotLabel(r) {
 }
 
 /* ============================================================================
+
    Component
+
+   ✅ FIX INCLUDED:
+   - If you render <MyRequest /> as a PAGE (no props), it will open by default.
+   - If you render it as a MODAL (controlled), pass open/onOpenChange normally.
+
 ============================================================================ */
-export default function MyRequest({ open, onOpenChange }) {
+export default function MyRequest({ open: openProp, onOpenChange: onOpenChangeProp }) {
+  // If open prop is missing, default to open (so it works as a page).
+  const [internalOpen, setInternalOpen] = useState(true);
+  const open = openProp ?? internalOpen;
+  const onOpenChange = onOpenChangeProp ?? setInternalOpen;
+
   const auth = useMemo(() => readAuth(), []);
   const token = useMemo(() => getToken(auth), [auth]);
   const requestOwnerId = useMemo(() => getUserId(auth), [auth]);
+
+  // Build base candidates (robust against missing /api in env)
+  const API_BASES = useMemo(() => {
+    const b = String(RAW_API_BASE || "").replace(/\/+$/, "");
+    const candidates = [];
+
+    if (b) candidates.push(b);
+    // if env is host-only (no /api), try adding /api
+    if (b && !/\/api$/i.test(b)) candidates.push(`${b}/api`);
+
+    // always try relative /api
+    candidates.push("/api");
+    // and also try empty base as last resort
+    candidates.push("");
+
+    return [...new Set(candidates)];
+  }, []);
 
   const headers = useMemo(
     () => ({
@@ -177,6 +202,11 @@ export default function MyRequest({ open, onOpenChange }) {
   const [loading, setLoading] = useState({ burial: false, maintenance: false });
   const [msg, setMsg] = useState({ type: "", text: "" });
 
+  const expandUrls = useCallback(
+    (paths) => paths.flatMap((p) => API_BASES.map((base) => `${base}${p}`)),
+    [API_BASES]
+  );
+
   const fetchList = useCallback(
     async (which) => {
       if (!requestOwnerId) {
@@ -192,19 +222,15 @@ export default function MyRequest({ open, onOpenChange }) {
 
       const urls =
         which === "burial"
-          ? PATHS.burialList(requestOwnerId).map((p) => `${API_BASE}${p}`)
-          : PATHS.maintenanceList(requestOwnerId).map((p) => `${API_BASE}${p}`);
+          ? expandUrls(PATHS.burialList(requestOwnerId))
+          : expandUrls(PATHS.maintenanceList(requestOwnerId));
 
       setLoading((l) => ({ ...l, [which]: true }));
       setMsg({ type: "", text: "" });
 
       try {
         const { body } = await fetchFirstOk(urls, { headers });
-        const rows = Array.isArray(body?.data)
-          ? body.data
-          : Array.isArray(body)
-          ? body
-          : [];
+        const rows = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
         setList(rows);
       } catch (err) {
         setMsg({
@@ -216,7 +242,7 @@ export default function MyRequest({ open, onOpenChange }) {
         setLoading((l) => ({ ...l, [which]: false }));
       }
     },
-    [requestOwnerId, token, headers]
+    [expandUrls, headers, requestOwnerId, token]
   );
 
   useEffect(() => {
@@ -244,17 +270,17 @@ export default function MyRequest({ open, onOpenChange }) {
     try {
       const urls =
         which === "burial"
-          ? PATHS.cancelBurial(id).map((p) => `${API_BASE}${p}`)
-          : PATHS.cancelMaintenance(id).map((p) => `${API_BASE}${p}`);
+          ? expandUrls(PATHS.cancelBurial(id))
+          : expandUrls(PATHS.cancelMaintenance(id));
 
-      // try PATCH first (common), fallback to POST if backend differs
+      // try PATCH first, fallback to POST
       try {
         await fetchFirstOk(urls, {
           method: "PATCH",
           headers,
           body: JSON.stringify({ reason: "user-cancelled" }),
         });
-      } catch (e) {
+      } catch {
         await fetchFirstOk(urls, {
           method: "POST",
           headers,
@@ -264,7 +290,7 @@ export default function MyRequest({ open, onOpenChange }) {
 
       setMsg({ type: "ok", text: "Request cancelled." });
 
-      // refresh that list
+      // refresh list
       await fetchList(which);
 
       setTimeout(() => {
@@ -334,9 +360,7 @@ export default function MyRequest({ open, onOpenChange }) {
 
           <TabsContent value="burial" className="mt-4 space-y-3">
             <div className="flex items-center justify-between">
-              <div className="text-sm text-slate-600">
-                Showing your burial requests.
-              </div>
+              <div className="text-sm text-slate-600">Showing your burial requests.</div>
               <Button
                 variant="outline"
                 size="sm"
@@ -359,9 +383,7 @@ export default function MyRequest({ open, onOpenChange }) {
 
           <TabsContent value="maintenance" className="mt-4 space-y-3">
             <div className="flex items-center justify-between">
-              <div className="text-sm text-slate-600">
-                Showing your maintenance requests.
-              </div>
+              <div className="text-sm text-slate-600">Showing your maintenance requests.</div>
               <Button
                 variant="outline"
                 size="sm"
@@ -388,7 +410,9 @@ export default function MyRequest({ open, onOpenChange }) {
 }
 
 /* ============================================================================
+
    UI Pieces
+
 ============================================================================ */
 function SkeletonCard() {
   return (
@@ -507,10 +531,7 @@ function RequestGrid({ type, rows, loading, onCancel }) {
         const id = r.id ?? r.request_id ?? r.reference_no ?? "-";
         const status = normStatus(r.status);
 
-        const isClosed =
-          status === "cancelled" ||
-          status === "rejected" ||
-          status === "completed";
+        const isClosed = status === "cancelled" || status === "rejected" || status === "completed";
 
         return (
           <Card
@@ -611,11 +632,7 @@ function RequestGrid({ type, rows, loading, onCancel }) {
                   className="gap-2 shadow-md hover:shadow-lg transition-all hover:border-rose-300"
                   onClick={() => onCancel(type, id)}
                   disabled={isClosed || status === "approved" || status === "confirmed"}
-                  title={
-                    isClosed
-                      ? "This request is already closed"
-                      : "Cancel this request"
-                  }
+                  title={isClosed ? "This request is already closed" : "Cancel this request"}
                 >
                   <X className="h-4 w-4" />
                   Cancel
