@@ -18,6 +18,12 @@ import {
  * Enhanced DetailsModal with:
  * - custom 'actions' footer (e.g. Reserve / Edit)
  * - image support for deceased photo (photo_url / photo / avatar)
+ * - ✅ NEW: showCloseButton / showEditButton controls (footer buttons only)
+ * - ✅ NEW: optional onEdit callback for "Edit Details" button
+ *
+ * NOTE:
+ * - The ❌/X button in the header still closes the modal (always shown).
+ * - Footer buttons can be hidden per-page via props.
  */
 export default function DetailsModal({
   open,
@@ -26,6 +32,11 @@ export default function DetailsModal({
   record = null,
   onClose,
   actions,
+
+  // ✅ NEW (footer controls)
+  showCloseButton = true,
+  showEditButton = true,
+  onEdit,
 }) {
   const containerRef = useRef(null);
 
@@ -93,12 +104,15 @@ export default function DetailsModal({
             <p className="text-gray-600 mb-6">
               Please select a record to view details.
             </p>
-            <button
-              onClick={onClose}
-              className="w-full py-2.5 px-4 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-colors duration-200 font-medium"
-            >
-              Close
-            </button>
+
+            {showCloseButton && (
+              <button
+                onClick={onClose}
+                className="w-full py-2.5 px-4 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-colors duration-200 font-medium"
+              >
+                Close
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -201,9 +215,8 @@ export default function DetailsModal({
 
       case "select": {
         const label =
-          (f.options || []).find(
-            (o) => String(o.value) === String(raw)
-          )?.label ||
+          (f.options || []).find((o) => String(o.value) === String(raw))
+            ?.label ||
           raw ||
           "Not specified";
         return (
@@ -258,9 +271,7 @@ export default function DetailsModal({
           <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
             {icon}
             <div className="flex flex-col">
-              <span className="text-sm font-medium text-gray-900">
-                {dateStr}
-              </span>
+              <span className="text-sm font-medium text-gray-900">{dateStr}</span>
               {timeStr && (
                 <span className="text-xs text-gray-500">{timeStr}</span>
               )}
@@ -289,6 +300,12 @@ export default function DetailsModal({
         record?.plot_name ||
         record?.email ||
         "Record Details");
+
+  // ✅ Only render footer if something will be shown there
+  const shouldShowFooter =
+    !!actions ||
+    !!showCloseButton ||
+    (showEditButton && typeof onEdit === "function");
 
   return (
     <div
@@ -328,6 +345,7 @@ export default function DetailsModal({
                 </div>
               )}
 
+              {/* ❌ always available */}
               <button
                 type="button"
                 onClick={onClose}
@@ -366,27 +384,33 @@ export default function DetailsModal({
             </div>
           </div>
 
-          {/* Footer */}
-          <div className="flex items-center justify-end gap-4 border-t border-gray-100 px-8 py-6 bg-gray-50/50 shrink-0">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-6 py-2.5 text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-xl transition-colors duration-200 font-medium"
-            >
-              Close
-            </button>
+          {/* Footer (✅ now configurable) */}
+          {shouldShowFooter && (
+            <div className="flex items-center justify-end gap-4 border-t border-gray-100 px-8 py-6 bg-gray-50/50 shrink-0">
+              {showCloseButton && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-6 py-2.5 text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-xl transition-colors duration-200 font-medium"
+                >
+                  Close
+                </button>
+              )}
 
-            {actions ? (
-              actions
-            ) : (
-              <button
-                type="button"
-                className="hidden px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 text-white rounded-xl hover:from-emerald-700 hover:to-green-700 transition-all duration-200 font-medium shadow-lg shadow-emerald-600/25"
-              >
-                Edit Details
-              </button>
-            )}
-          </div>
+              {showEditButton && typeof onEdit === "function" && (
+                <button
+                  type="button"
+                  onClick={() => onEdit(record)}
+                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 text-white rounded-xl hover:from-emerald-700 hover:to-green-700 transition-all duration-200 font-medium shadow-lg shadow-emerald-600/25"
+                >
+                  Edit Details
+                </button>
+              )}
+
+              {/* Custom actions (Reserve, etc.) */}
+              {actions}
+            </div>
+          )}
         </div>
       </div>
     </div>

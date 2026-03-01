@@ -1,5 +1,5 @@
 // frontend/src/views/admin/pages/BurialSchedule.jsx
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -39,25 +39,23 @@ import {
   CheckCircle2,
   Clock3,
   MapPin,
-  Bug,
   XCircle,
+  FileText,
+  Upload,
+  ExternalLink,
+  Download,
 } from "lucide-react";
 
 import { Toaster, toast } from "sonner";
 
-import CemeteryMap, {
-  CEMETERY_CENTER,
-} from "../../../components/map/CemeteryMap.jsx";
-
+import CemeteryMap, { CEMETERY_CENTER } from "../../../components/map/CemeteryMap.jsx";
 import ReservationDialog from "../../../views/visitor/components/ReservationDialog";
 
 /* =========================================================================================
   ✅ LOCAL Skeleton (so you don't need components/ui/skeleton)
 ========================================================================================= */
 function Skeleton({ className = "" }) {
-  return (
-    <div className={`animate-pulse rounded-md bg-slate-100 ${className}`} />
-  );
+  return <div className={`animate-pulse rounded-md bg-slate-100 ${className}`} />;
 }
 
 /* =========================================================================================
@@ -78,9 +76,7 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.err) {
       const msg =
-        this.state.err?.message ||
-        String(this.state.err) ||
-        "Unknown render error";
+        this.state.err?.message || String(this.state.err) || "Unknown render error";
       return (
         <div className="p-6">
           <div className="max-w-3xl mx-auto rounded-xl border bg-white p-5">
@@ -138,8 +134,7 @@ class ErrorBoundary extends React.Component {
 }
 
 const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) ||
-  "";
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "";
 
 /* --------------------------- auth helpers --------------------------- */
 function readAuth() {
@@ -166,6 +161,24 @@ function authHeaders(extra = {}) {
 function useAuthUser() {
   const auth = readAuth();
   return useMemo(() => auth?.user ?? null, [auth]);
+}
+
+/* --------------------------- URL helpers --------------------------- */
+// If API_BASE is like "http://localhost:5000/api", files are usually served from "http://localhost:5000/uploads"
+function fileBase() {
+  const base = String(API_BASE || "").trim();
+  if (!base) return "";
+  return base.replace(/\/api\/?$/i, "");
+}
+function toFileUrl(pathOrUrl) {
+  if (!pathOrUrl) return null;
+  const s = String(pathOrUrl).trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) return s;
+  const fb = fileBase();
+  // ensure leading slash
+  const p = s.startsWith("/") ? s : `/${s}`;
+  return `${fb}${p}`;
 }
 
 /* --------------------------- reservation helper --------------------------- */
@@ -219,11 +232,7 @@ const fmtDateLong = (s) => {
   if (!s) return "—";
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return String(s);
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 };
 
 const fmtDateShort = (s) => {
@@ -265,11 +274,7 @@ const plotStatusBadge = (s) => {
 };
 
 /* -------------------- GeoJSON ➜ CemeteryMap helpers -------------------- */
-const DEFAULT_PLOT_STYLE = {
-  strokeOpacity: 0.8,
-  strokeWeight: 1.5,
-  fillOpacity: 0.35,
-};
+const DEFAULT_PLOT_STYLE = { strokeOpacity: 0.8, strokeWeight: 1.5, fillOpacity: 0.35 };
 
 const HIGHLIGHTED_PLOT_STYLE = {
   strokeColor: "#0ea5e9",
@@ -292,11 +297,9 @@ function featureToMapShapes(feature, highlightedId) {
   const id = getFeatId(feature);
   const type = geometry.type;
   const coords = geometry.coordinates;
-
   if (!coords) return out;
 
-  const isHighlighted =
-    highlightedId && id && String(id) === String(highlightedId);
+  const isHighlighted = highlightedId && id && String(id) === String(highlightedId);
 
   const baseOptions = isHighlighted
     ? { ...DEFAULT_PLOT_STYLE, ...HIGHLIGHTED_PLOT_STYLE }
@@ -315,13 +318,7 @@ function featureToMapShapes(feature, highlightedId) {
       .filter(Boolean);
     if (path.length === 0) return;
 
-    out.polygons.push({
-      id: polyId,
-      path,
-      options: baseOptions,
-      properties,
-      status,
-    });
+    out.polygons.push({ id: polyId, path, options: baseOptions, properties, status });
   };
 
   if (type === "Point") {
@@ -338,12 +335,7 @@ function featureToMapShapes(feature, highlightedId) {
 
   if (type === "Polygon") {
     const rings = Array.isArray(coords) ? coords : [];
-    if (rings[0]) {
-      pushPolygonFromRing(
-        rings[0],
-        id || `poly-${Math.random().toString(36).slice(2)}`
-      );
-    }
+    if (rings[0]) pushPolygonFromRing(rings[0], id || `poly-${Math.random().toString(36).slice(2)}`);
     return out;
   }
 
@@ -351,9 +343,7 @@ function featureToMapShapes(feature, highlightedId) {
     const polys = Array.isArray(coords) ? coords : [];
     polys.forEach((polyCoords, idx) => {
       const rings = Array.isArray(polyCoords) ? polyCoords : [];
-      if (rings[0]) {
-        pushPolygonFromRing(rings[0], `${id || "poly"}-${idx}`);
-      }
+      if (rings[0]) pushPolygonFromRing(rings[0], `${id || "poly"}-${idx}`);
     });
     return out;
   }
@@ -381,6 +371,30 @@ function pickReqTime(r) {
 }
 function getReqPlotLabel(r) {
   return r?.plot_code || r?.plot_name || r?.plot_uid || r?.plot_id || "—";
+}
+function getDeathCertPath(r) {
+  return (
+    r?.death_certificate_url ||
+    r?.death_certificate ||
+    r?.death_certificate_path ||
+    r?.death_cert_url ||
+    r?.death_cert ||
+    null
+  );
+}
+function isPdfUrl(u) {
+  const s = String(u || "").toLowerCase();
+  return s.includes(".pdf") || s.includes("application/pdf");
+}
+function isImageUrl(u) {
+  const s = String(u || "").toLowerCase();
+  return (
+    s.includes(".png") ||
+    s.includes(".jpg") ||
+    s.includes(".jpeg") ||
+    s.includes(".webp") ||
+    s.includes(".gif")
+  );
 }
 
 /* confirm helper */
@@ -427,6 +441,47 @@ async function confirmBurialRequest(id) {
   throw lastErr || new Error("Confirm failed.");
 }
 
+/* -------------------------- death certificate upload helper -------------------------- */
+async function uploadDeathCertificateForRequest(requestId, file) {
+  const token = getToken();
+  if (!token) throw new Error("Unauthorized. Please login again.");
+  if (!requestId) throw new Error("Missing request id.");
+  if (!file) throw new Error("No file selected.");
+
+  const form = new FormData();
+  // backend expects: upload.single("death_certificate")
+  form.append("death_certificate", file);
+
+  const idEnc = encodeURIComponent(String(requestId));
+  const url = `${API_BASE}/admin/burial-requests/${idEnc}/death-certificate`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: authHeaders({
+      Accept: "application/json",
+      // DO NOT set Content-Type for multipart
+    }),
+    body: form,
+  });
+
+  const ct = res.headers.get("content-type") || "";
+  const body = ct.includes("application/json")
+    ? await res.json().catch(() => ({}))
+    : await res.text();
+
+  if (!res.ok) {
+    const msg =
+      typeof body === "string"
+        ? body
+        : body?.error || body?.message || "Upload failed.";
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+
+  return body;
+}
+
 /* =========================================================================================
    Page main
 ========================================================================================= */
@@ -463,13 +518,10 @@ function BurialScheduleInner() {
   const [apiError, setApiError] = useState(null);
   const [runtimeErrors, setRuntimeErrors] = useState([]);
 
-
   useEffect(() => {
     const onError = (ev) => {
       const msg =
-        ev?.error?.message ||
-        ev?.message ||
-        "Unknown window error (check console)";
+        ev?.error?.message || ev?.message || "Unknown window error (check console)";
       setRuntimeErrors((prev) =>
         [{ type: "error", msg, ts: Date.now() }, ...prev].slice(0, 10)
       );
@@ -535,7 +587,6 @@ function BurialScheduleInner() {
 
   const fetchPlots = useCallback(async () => {
     try {
-      // ✅ backend you shared supports /admin/plots?status=available
       const res = await fetch(`${API_BASE}/admin/plots?status=available&limit=500`, {
         headers: authHeaders({ Accept: "application/json" }),
       });
@@ -546,11 +597,7 @@ function BurialScheduleInner() {
         : await res.text();
 
       const arr =
-        body?.data && Array.isArray(body.data)
-          ? body.data
-          : Array.isArray(body)
-          ? body
-          : [];
+        body?.data && Array.isArray(body.data) ? body.data : Array.isArray(body) ? body : [];
 
       setPlots(arr);
     } catch (e) {
@@ -623,22 +670,15 @@ function BurialScheduleInner() {
     return rows.filter((r) => {
       const deceased = String(r?.deceased_name || "").toLowerCase();
       const family = String(
-        r?.family_contact_name ||
-          r?.family_contact_email ||
-          r?.family_contact ||
-          ""
+        r?.family_contact_name || r?.family_contact_email || r?.family_contact || ""
       ).toLowerCase();
       const plot = String(getReqPlotLabel(r)).toLowerCase();
 
       const passQ =
-        !needle ||
-        deceased.includes(needle) ||
-        family.includes(needle) ||
-        plot.includes(needle);
+        !needle || deceased.includes(needle) || family.includes(needle) || plot.includes(needle);
 
       const st = safeLower(r?.status);
-      const passStatus =
-        statusFilter === "All" || st === safeLower(statusFilter);
+      const passStatus = statusFilter === "All" || st === safeLower(statusFilter);
 
       return passQ && passStatus;
     });
@@ -687,32 +727,27 @@ function BurialScheduleInner() {
     return id != null ? String(id) : null;
   }, [hoveredRow, viewItem, selectedPlot]);
 
-  const mapShapes = useMemo(
-    () => fcToMapShapes(fc, highlightedPlotId),
-    [fc, highlightedPlotId]
-  );
+  const mapShapes = useMemo(() => fcToMapShapes(fc, highlightedPlotId), [fc, highlightedPlotId]);
 
-const onConfirm = async (row) => {
-  const id = row?.id; // ✅ only DB id
+  const onConfirm = async (row) => {
+    const id = row?.id; // ✅ only DB id
+    if (id === null || id === undefined) {
+      console.error("Row missing id:", row);
+      return toast.error("Missing request id.");
+    }
 
-  if (id === null || id === undefined) {
-    console.error("Row missing id:", row);
-    return toast.error("Missing request id.");
-  }
-
-  try {
-    toast.message("Confirming burial request...");
-    await confirmBurialRequest(id);
-    toast.success("Request confirmed, plot was updated to occupied.");
-    await fetchRequests();
-    await fetchPlots();
-    await fetchPlotsGeo();
-  } catch (e) {
-    console.error("confirm error:", e);
-    toast.error(e?.message || "Failed to confirm request.");
-  }
-};
-
+    try {
+      toast.message("Confirming burial request...");
+      await confirmBurialRequest(id);
+      toast.success("Request confirmed, plot was updated to occupied.");
+      await fetchRequests();
+      await fetchPlots();
+      await fetchPlotsGeo();
+    } catch (e) {
+      console.error("confirm error:", e);
+      toast.error(e?.message || "Failed to confirm request.");
+    }
+  };
 
   return (
     <div className="w-full">
@@ -738,7 +773,6 @@ const onConfirm = async (row) => {
                 <RefreshCcw className="h-4 w-4" />
                 Refresh
               </Button>
-
             </div>
           </div>
 
@@ -755,8 +789,6 @@ const onConfirm = async (row) => {
             <MiniStat icon={CheckCircle2} label="Confirmed" value={stats.confirmed} />
             <MiniStat icon={ShieldCheck} label="Completed" value={stats.completed} />
           </div>
-
-         
         </CardHeader>
 
         <CardContent>
@@ -815,15 +847,16 @@ const onConfirm = async (row) => {
                   <Skeleton className="h-10 w-full" />
                 </div>
               ) : filtered.length === 0 ? (
-                <div className="p-6 text-sm text-slate-500">
-                  No burial requests found.
-                </div>
+                <div className="p-6 text-sm text-slate-500">No burial requests found.</div>
               ) : (
                 filtered.map((r) => {
                   const reqDate = pickReqDate(r);
                   const reqTime = pickReqTime(r);
                   const status = safeLower(r?.status);
                   const canConfirm = status === "pending";
+
+                  const dc = getDeathCertPath(r);
+                  const hasDC = !!dc;
 
                   return (
                     <div
@@ -835,8 +868,14 @@ const onConfirm = async (row) => {
                       <div className="col-span-3 flex items-center gap-2 min-w-0">
                         <UserCircle2 className="h-4 w-4 text-slate-400" />
                         <div className="min-w-0">
-                          <div className="truncate font-medium text-slate-800">
-                            {r.deceased_name || "—"}
+                          <div className="truncate font-medium text-slate-800 flex items-center gap-2">
+                            <span className="truncate">{r.deceased_name || "—"}</span>
+                            {hasDC ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] text-white">
+                                <FileText className="h-3 w-3" />
+                                DC
+                              </span>
+                            ) : null}
                           </div>
                           <div className="truncate text-xs text-slate-500">
                             {r.family_contact_name ||
@@ -902,9 +941,7 @@ const onConfirm = async (row) => {
           <div className="mt-4 rounded-xl overflow-hidden border bg-white">
             <div className="px-4 py-3">
               <div className="text-sm font-medium text-slate-800">Plot Map</div>
-              <div className="text-xs text-slate-500">
-                Click a plot to reserve as admin.
-              </div>
+              <div className="text-xs text-slate-500">Click a plot to reserve as admin.</div>
             </div>
 
             {!isAnyModalOpen && (
@@ -924,6 +961,21 @@ const onConfirm = async (row) => {
               </div>
             )}
           </div>
+
+          {/* Optional debug box for runtime errors */}
+          {runtimeErrors.length ? (
+            <div className="mt-4 rounded-xl border bg-white p-3">
+              <div className="text-xs font-semibold text-slate-700">Runtime Errors (latest 10)</div>
+              <div className="mt-2 space-y-2">
+                {runtimeErrors.map((e) => (
+                  <div key={e.ts} className="rounded-lg bg-slate-50 p-2 text-xs text-slate-700">
+                    <div className="font-medium">{e.type}</div>
+                    <div className="mt-1 whitespace-pre-wrap">{e.msg}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -964,7 +1016,14 @@ const onConfirm = async (row) => {
         }}
       />
 
-      <ViewModal item={viewItem} onOpenChange={(o) => !o && setViewItem(null)} />
+      <ViewModal
+        item={viewItem}
+        onOpenChange={(o) => !o && setViewItem(null)}
+        onUploaded={async () => {
+          // refresh after upload
+          await fetchRequests();
+        }}
+      />
     </div>
   );
 }
@@ -1059,16 +1118,59 @@ function Field({ label, children }) {
   );
 }
 
-function ViewModal({ item, onOpenChange }) {
+function ViewModal({ item, onOpenChange, onUploaded }) {
   const open = !!item;
 
   const date = pickReqDate(item);
   const time = pickReqTime(item);
   const plotLabel = getReqPlotLabel(item);
 
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) {
+      setUploading(false);
+    }
+  }, [open]);
+
+  const dcPath = getDeathCertPath(item);
+  const dcUrl = toFileUrl(dcPath);
+
+  const canPreviewImg = dcUrl && isImageUrl(dcUrl);
+  const canPreviewPdf = dcUrl && isPdfUrl(dcUrl);
+
+  const doPickFile = () => {
+    if (uploading) return;
+    fileRef.current?.click?.();
+  };
+
+  const onFileChange = async (e) => {
+    const f = e.target.files?.[0] || null;
+    if (!f) return;
+
+    // reset input so picking same file again still triggers change
+    e.target.value = "";
+
+    try {
+      setUploading(true);
+      toast.message("Uploading death certificate...");
+
+      await uploadDeathCertificateForRequest(item?.id, f);
+
+      toast.success("Death certificate uploaded.");
+      onUploaded?.();
+    } catch (err) {
+      console.error("death cert upload error:", err);
+      toast.error(err?.message || "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Burial Request Details</DialogTitle>
           <DialogDescription>Full details for this request.</DialogDescription>
@@ -1103,6 +1205,78 @@ function ViewModal({ item, onOpenChange }) {
               >
                 {normalizeStatusLabel(item.status)}
               </span>
+            </Field>
+
+            <Field label="Death Certificate">
+              <div className="space-y-2">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/*,application/pdf"
+                  onChange={onFileChange}
+                />
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={doPickFile}
+                    disabled={uploading}
+                  >
+                    <Upload className="h-4 w-4" />
+                    {dcUrl ? "Replace" : "Upload"}
+                  </Button>
+
+                  {dcUrl ? (
+                    <>
+                      <a href={dcUrl} target="_blank" rel="noreferrer">
+                        <Button type="button" variant="secondary" className="gap-2">
+                          <ExternalLink className="h-4 w-4" />
+                          Open
+                        </Button>
+                      </a>
+                      <a href={dcUrl} download>
+                        <Button type="button" variant="secondary" className="gap-2">
+                          <Download className="h-4 w-4" />
+                          Download
+                        </Button>
+                      </a>
+                    </>
+                  ) : (
+                    <div className="text-xs text-slate-500">No file uploaded.</div>
+                  )}
+                </div>
+
+                {dcUrl ? (
+                  <div className="rounded-xl border bg-white p-3">
+                    <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
+                      <FileText className="h-4 w-4" />
+                      <span className="font-medium">Preview</span>
+                      <span className="text-slate-400">(image/pdf)</span>
+                    </div>
+
+                    {canPreviewImg ? (
+                      <img
+                        src={dcUrl}
+                        alt="Death Certificate"
+                        className="max-h-[420px] w-full rounded-lg object-contain bg-slate-50"
+                      />
+                    ) : canPreviewPdf ? (
+                      <iframe
+                        title="Death Certificate PDF"
+                        src={dcUrl}
+                        className="h-[420px] w-full rounded-lg border bg-white"
+                      />
+                    ) : (
+                      <div className="text-sm text-slate-600">
+                        Preview not supported for this file type. Use Open/Download.
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
             </Field>
 
             <Field label="Notes">

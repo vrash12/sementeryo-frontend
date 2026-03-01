@@ -40,7 +40,9 @@ import {
   ShieldCheck,
   XCircle,
   Sparkles,
-  Users, // ✅ added
+  Users,
+  UploadCloud,
+  FileText,
 } from "lucide-react";
 
 // ✅ Map
@@ -199,6 +201,36 @@ function extractPlotIdAny(r) {
 
 const getRowPlotId = (r) => extractPlotIdAny(r);
 
+/* -------------------- file url helpers (uploads) -------------------- */
+function apiOriginFromBase(base) {
+  if (!base) return "";
+  const s = String(base);
+  if (s.startsWith("http://") || s.startsWith("https://")) {
+    return s.replace(/\/api\/?$/i, "");
+  }
+  // relative base like "/api" -> same origin
+  return "";
+}
+function fileUrlFromUploads(p) {
+  if (!p) return "";
+  if (/^https?:\/\//i.test(p)) return p;
+  const origin = apiOriginFromBase(API_BASE);
+  return `${origin}${p}`;
+}
+
+// ✅ detect cert type from URL (for modal preview)
+function stripQueryHash(u) {
+  return String(u || "").split("#")[0].split("?")[0];
+}
+function isPdfUrl(u) {
+  const x = stripQueryHash(u).toLowerCase();
+  return x.endsWith(".pdf");
+}
+function isImageUrl(u) {
+  const x = stripQueryHash(u).toLowerCase();
+  return x.endsWith(".jpg") || x.endsWith(".jpeg") || x.endsWith(".png") || x.endsWith(".webp");
+}
+
 /* -------------------- GeoJSON ➜ CemeteryMap helpers -------------------- */
 const DEFAULT_PLOT_STYLE = {
   strokeOpacity: 0.8,
@@ -351,6 +383,25 @@ function getTodayYMD() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+// ✅ Add/subtract days from a YYYY-MM-DD string (safe UTC math)
+function addDaysYMD(ymd, deltaDays) {
+  if (!ymd) return "";
+  const parts = String(ymd).split("-");
+  if (parts.length !== 3) return String(ymd);
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return String(ymd);
+
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + Number(deltaDays || 0));
+
+  const yyyy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 /* -------------------- date clamp helpers (YYYY-MM-DD) -------------------- */
 function clampToMaxYMD(v, maxYMD) {
   if (!v) return "";
@@ -384,6 +435,9 @@ export default function Inquire() {
   const headersAuth = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : {}), [token]);
 
   const todayYMD = useMemo(() => getTodayYMD(), []);
+
+  // ✅ Death Date rule: can be ANY past date, but NOT today and NOT future
+  const deathMaxYMD = useMemo(() => addDaysYMD(todayYMD, -1), [todayYMD]); // yesterday
 
   // ✅ Request type: "maintenance" | "burial"
   const [requestType, setRequestType] = useState("maintenance");
@@ -440,14 +494,40 @@ export default function Inquire() {
     burialDate: "",
   });
 
-  // ✅ make sure birth/death can NEVER advance to the future
+  // ✅ IMPORTANT: To avoid "no available dates" on Death Date,
+  // Birth Date must ALSO be capped to yesterday.
   const birthMaxYMD = useMemo(() => {
     const d = burialForm.deathDate;
-    if (d && d < todayYMD) return d;
-    return todayYMD;
-  }, [burialForm.deathDate, todayYMD]);
+    // if deathDate exists, birth max is min(deathDate, yesterday)
+    if (d) return d < deathMaxYMD ? d : deathMaxYMD;
+    // if no deathDate yet, still cap to yesterday
+    return deathMaxYMD;
+  }, [burialForm.deathDate, deathMaxYMD]);
 
-  const deathMinYMD = useMemo(() => burialForm.birthDate || "", [burialForm.birthDate]);
+  const deathMinYMD = useMemo(() => {
+    const b = burialForm.birthDate || "";
+    return b ? clampToMaxYMD(b, deathMaxYMD) : "";
+  }, [burialForm.birthDate, deathMaxYMD]);
+
+  // ✅ Keep burial dates clamped so min/max never becomes invalid
+  useEffect(() => {
+    setBurialForm((f) => {
+      let birthDate = f.birthDate || "";
+      let deathDate = f.deathDate || "";
+
+      // birth <= yesterday
+      if (birthDate && birthDate > deathMaxYMD) birthDate = deathMaxYMD;
+
+      // death <= yesterday
+      if (deathDate && deathDate > deathMaxYMD) deathDate = deathMaxYMD;
+
+      // death >= birth
+      if (birthDate && deathDate && deathDate < birthDate) deathDate = birthDate;
+
+      if (birthDate === (f.birthDate || "") && deathDate === (f.deathDate || "")) return f;
+      return { ...f, birthDate, deathDate };
+    });
+  }, [deathMaxYMD]);
 
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState({ type: "", text: "" });
@@ -656,9 +736,7 @@ export default function Inquire() {
 
   /* -------------------- Plot selection (final linked plot) -------------------- */
   const linkedPlotId = useMemo(() => manualPlotId || autoPlotId || null, [manualPlotId, autoPlotId]);
-
   const highlightedPlotId = linkedPlotId;
-
   const mapShapes = useMemo(() => fcToMapShapes(fc, highlightedPlotId), [fc, highlightedPlotId]);
 
   // ✅ Burial must have a plot_id (from linkedPlotId)
@@ -760,12 +838,13 @@ export default function Inquire() {
           return;
         }
 
-        if (burialForm.birthDate > todayYMD) {
-          setMsg({ type: "error", text: "Birth date cannot be in the future." });
+        // ✅ Birth/Death cannot be today or future (deathMaxYMD = yesterday)
+        if (burialForm.birthDate > deathMaxYMD) {
+          setMsg({ type: "error", text: "Birth date cannot be today or in the future." });
           return;
         }
-        if (burialForm.deathDate > todayYMD) {
-          setMsg({ type: "error", text: "Death date cannot be in the future." });
+        if (burialForm.deathDate > deathMaxYMD) {
+          setMsg({ type: "error", text: "Death date cannot be today or in the future." });
           return;
         }
 
@@ -842,7 +921,9 @@ export default function Inquire() {
     try {
       setMsg({ type: "", text: "" });
 
-      const url = `${API_BASE}/visitor/maintenance/${encodeURIComponent(String(id))}/request-reschedule`;
+      const url = `${API_BASE}/visitor/maintenance/${encodeURIComponent(
+        String(id)
+      )}/request-reschedule`;
 
       const res = await fetch(url, {
         method: "PATCH",
@@ -945,6 +1026,124 @@ export default function Inquire() {
     }
   };
 
+  /* -------------------- Death Certificate UPLOAD dialog UI (Burial Request) -------------------- */
+  const [deathCertOpen, setDeathCertOpen] = useState(false);
+  const [deathCertTarget, setDeathCertTarget] = useState(null);
+  const [deathCertFile, setDeathCertFile] = useState(null);
+  const [deathCertUploading, setDeathCertUploading] = useState(false);
+
+  // ✅ preview helpers (CURRENT uploaded + SELECTED file)
+  const currentDeathCertUrl = useMemo(() => {
+    const p = deathCertTarget?.death_certificate_url;
+    return p ? fileUrlFromUploads(p) : "";
+  }, [deathCertTarget]);
+
+  const currentDeathCertKind = useMemo(() => {
+    if (!currentDeathCertUrl) return "";
+    if (isPdfUrl(currentDeathCertUrl)) return "pdf";
+    if (isImageUrl(currentDeathCertUrl)) return "image";
+    return "other";
+  }, [currentDeathCertUrl]);
+
+  const [selectedDeathCertPreviewUrl, setSelectedDeathCertPreviewUrl] = useState("");
+  useEffect(() => {
+    if (!deathCertFile) {
+      setSelectedDeathCertPreviewUrl("");
+      return;
+    }
+    const url = URL.createObjectURL(deathCertFile);
+    setSelectedDeathCertPreviewUrl(url);
+    return () => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+    };
+  }, [deathCertFile]);
+
+  const selectedDeathCertKind = useMemo(() => {
+    if (!selectedDeathCertPreviewUrl || !deathCertFile) return "";
+    const t = String(deathCertFile.type || "").toLowerCase();
+    if (t === "application/pdf") return "pdf";
+    if (t.startsWith("image/")) return "image";
+    return "other";
+  }, [selectedDeathCertPreviewUrl, deathCertFile]);
+
+  const openDeathCert = (row) => {
+    setDeathCertTarget(row);
+    setDeathCertFile(null);
+    setDeathCertOpen(true);
+  };
+
+  const closeDeathCert = () => {
+    setDeathCertOpen(false);
+    setDeathCertTarget(null);
+    setDeathCertFile(null);
+    setSelectedDeathCertPreviewUrl("");
+  };
+
+  const uploadDeathCert = async () => {
+    if (!deathCertTarget?.id) return;
+
+    if (!deathCertFile) {
+      setMsg({ type: "error", text: "Please choose a file (JPG/PNG/WEBP/PDF)." });
+      return;
+    }
+
+    try {
+      setDeathCertUploading(true);
+      setMsg({ type: "", text: "" });
+
+      const fd = new FormData();
+      fd.append("death_certificate", deathCertFile);
+
+      const url = `${API_BASE}/visitor/burial-requests/${encodeURIComponent(
+        String(deathCertTarget.id)
+      )}/death-certificate`;
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { ...headersAuth }, // DO NOT set Content-Type for FormData
+        body: fd,
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || "Failed to upload death certificate");
+
+      setMsg({ type: "ok", text: data?.message || "Death certificate uploaded." });
+      closeDeathCert();
+      await loadMyBurialRequests();
+    } catch (e) {
+      setMsg({ type: "error", text: e.message || "Upload failed" });
+    } finally {
+      setDeathCertUploading(false);
+    }
+  };
+
+  /* -------------------- Death Certificate VIEW dialog (Burial Request) -------------------- */
+  const [viewCertOpen, setViewCertOpen] = useState(false);
+  const [viewCertTarget, setViewCertTarget] = useState(null);
+
+  const viewCertUrl = useMemo(() => {
+    const p = viewCertTarget?.death_certificate_url;
+    return p ? fileUrlFromUploads(p) : "";
+  }, [viewCertTarget]);
+
+  const viewCertKind = useMemo(() => {
+    if (!viewCertUrl) return "";
+    if (isPdfUrl(viewCertUrl)) return "pdf";
+    if (isImageUrl(viewCertUrl)) return "image";
+    return "other";
+  }, [viewCertUrl]);
+
+  const openViewCert = (row) => {
+    setViewCertTarget(row);
+    setViewCertOpen(true);
+  };
+  const closeViewCert = () => {
+    setViewCertOpen(false);
+    setViewCertTarget(null);
+  };
+
   /* -------------------- UI summary -------------------- */
   const maintenancePending = useMemo(
     () =>
@@ -1016,8 +1215,13 @@ export default function Inquire() {
         </Card>
 
         {!isVisitorLoggedIn && (
-          <Alert className="bg-rose-50/90 backdrop-blur border-rose-200 shadow-md" variant="destructive">
-            <AlertDescription className="text-rose-700">Please login to submit a request.</AlertDescription>
+          <Alert
+            className="bg-rose-50/90 backdrop-blur border-rose-200 shadow-md"
+            variant="destructive"
+          >
+            <AlertDescription className="text-rose-700">
+              Please login to submit a request.
+            </AlertDescription>
           </Alert>
         )}
 
@@ -1030,7 +1234,9 @@ export default function Inquire() {
                 : "bg-emerald-50/90 backdrop-blur border-emerald-200 shadow-md"
             }
           >
-            <AlertDescription className={msg.type === "error" ? "text-rose-700" : "text-emerald-700"}>
+            <AlertDescription
+              className={msg.type === "error" ? "text-rose-700" : "text-emerald-700"}
+            >
               {msg.text}
             </AlertDescription>
           </Alert>
@@ -1149,14 +1355,18 @@ export default function Inquire() {
                     <MapPin className="h-3.5 w-3.5" />
                     <span>
                       Linked plot:{" "}
-                      <span className="font-semibold">{linkedPlotId ? `#${linkedPlotId}` : "—"}</span>
+                      <span className="font-semibold">
+                        {linkedPlotId ? `#${linkedPlotId}` : "—"}
+                      </span>
                       {prefillReservationId ? (
-                        <span className="ml-2 text-slate-500">(Reservation #{prefillReservationId})</span>
+                        <span className="ml-2 text-slate-500">
+                          (Reservation #{prefillReservationId})
+                        </span>
                       ) : null}
                     </span>
                   </div>
 
-                  {/* ✅ NEW: Button to open "Add Relative" aside in Reservation page */}
+                  {/* Buttons */}
                   <div className="flex flex-wrap gap-2 pt-1">
                     <Button asChild variant="outline" className="gap-2">
                       <NavLink to="/visitor/reservation">
@@ -1165,7 +1375,6 @@ export default function Inquire() {
                       </NavLink>
                     </Button>
 
-                    {/* If your Reservation page listens to `open=relative`, it can auto-open the relative aside. */}
                     <Button asChild variant="secondary" className="gap-2">
                       <NavLink to="/visitor/reservation?open=relative&returnTo=/visitor/inquire">
                         <Users className="h-4 w-4" />
@@ -1230,7 +1439,9 @@ export default function Inquire() {
                         <Label>Priority</Label>
                         <Select
                           value={maintenanceForm.priority}
-                          onValueChange={(val) => setMaintenanceForm((f) => ({ ...f, priority: val }))}
+                          onValueChange={(val) =>
+                            setMaintenanceForm((f) => ({ ...f, priority: val }))
+                          }
                           disabled={!isVisitorLoggedIn || submitting}
                         >
                           <SelectTrigger className="bg-white/70">
@@ -1281,12 +1492,12 @@ export default function Inquire() {
                           type="date"
                           value={burialForm.deathDate}
                           min={deathMinYMD}
-                          max={todayYMD}
+                          max={deathMaxYMD}
                           onWheel={preventMouseWheelDateChange}
                           onChange={(e) => {
                             const raw = e.target.value || "";
-                            const v1 = clampToMaxYMD(raw, todayYMD);
-                            const v2 = clampToMinYMD(v1, deathMinYMD);
+                            const v1 = clampToMaxYMD(raw, deathMaxYMD); // ✅ no today/future
+                            const v2 = clampToMinYMD(v1, deathMinYMD); // ✅ not before birth
                             setBurialForm((f) => ({ ...f, deathDate: v2 }));
                           }}
                           disabled={!isVisitorLoggedIn || submitting}
@@ -1300,7 +1511,9 @@ export default function Inquire() {
                           type="date"
                           value={burialForm.burialDate}
                           onWheel={preventMouseWheelDateChange}
-                          onChange={(e) => setBurialForm((f) => ({ ...f, burialDate: e.target.value }))}
+                          onChange={(e) =>
+                            setBurialForm((f) => ({ ...f, burialDate: e.target.value }))
+                          }
                           disabled={!isVisitorLoggedIn || submitting}
                           className="bg-white/70"
                         />
@@ -1308,7 +1521,7 @@ export default function Inquire() {
                     </div>
 
                     <p className="text-[11px] text-slate-500">
-                      Birth/Death dates are locked to the past (no future dates). Death date also can’t be
+                      Birth/Death dates are locked to the past (no today/future dates). Death date also can’t be
                       earlier than Birth date.
                     </p>
                   </div>
@@ -1368,7 +1581,9 @@ export default function Inquire() {
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary" className="bg-white/60 border">
                   Highlighted plot:{" "}
-                  <span className="ml-1 font-semibold">{highlightedPlotId ? `#${highlightedPlotId}` : "—"}</span>
+                  <span className="ml-1 font-semibold">
+                    {highlightedPlotId ? `#${highlightedPlotId}` : "—"}
+                  </span>
                 </Badge>
 
                 {highlightedPlotId ? (
@@ -1419,7 +1634,8 @@ export default function Inquire() {
               </p>
 
               <p className="text-[11px] text-slate-500">
-                Debug: plots loaded = {fc?.features?.length || 0} • polygons rendered = {mapShapes.polygons.length}
+                Debug: plots loaded = {fc?.features?.length || 0} • polygons rendered ={" "}
+                {mapShapes.polygons.length}
               </p>
             </CardContent>
           </Card>
@@ -1500,7 +1716,8 @@ export default function Inquire() {
                               </div>
                               {r.assigned_staff_name ? (
                                 <div className="mt-1 text-slate-600">
-                                  Staff: <span className="font-medium">{r.assigned_staff_name}</span>
+                                  Staff:{" "}
+                                  <span className="font-medium">{r.assigned_staff_name}</span>
                                 </div>
                               ) : null}
                             </div>
@@ -1516,13 +1733,17 @@ export default function Inquire() {
                                       key={i}
                                       className={
                                         "h-4 w-4 " +
-                                        (Number(r.feedback_rating) >= i ? "text-amber-500" : "text-slate-300")
+                                        (Number(r.feedback_rating) >= i
+                                          ? "text-amber-500"
+                                          : "text-slate-300")
                                       }
                                       fill={Number(r.feedback_rating) >= i ? "currentColor" : "none"}
                                     />
                                   ))}
                                 </div>
-                                <span className="text-xs text-slate-600">({r.feedback_rating}/5)</span>
+                                <span className="text-xs text-slate-600">
+                                  ({r.feedback_rating}/5)
+                                </span>
                               </div>
                               {r.feedback_text ? (
                                 <div className="mt-2 text-sm text-slate-700">
@@ -1586,7 +1807,7 @@ export default function Inquire() {
           <CardHeader>
             <CardTitle className="text-xl font-bold text-slate-900">My Burial Requests</CardTitle>
             <CardDescription className="text-slate-600">
-              View your submitted burial requests and their status.
+              View your submitted burial requests and their status (including death certificate upload).
             </CardDescription>
           </CardHeader>
 
@@ -1626,6 +1847,12 @@ export default function Inquire() {
                                 Plot #{String(plotId)}
                               </Badge>
                             ) : null}
+
+                            {r.death_certificate_url ? (
+                              <Badge variant="outline" className="text-emerald-700 bg-white/50">
+                                Death certificate uploaded
+                              </Badge>
+                            ) : null}
                           </div>
 
                           <Separator className="my-3" />
@@ -1646,14 +1873,17 @@ export default function Inquire() {
                           </div>
                         </div>
 
-                        <div className="flex md:flex-col gap-2 md:min-w-[200px]">
+                        <div className="flex md:flex-col gap-2 md:min-w-[220px]">
                           <Button
                             variant="outline"
                             className="gap-2"
                             onClick={() => {
                               const pid = plotId || null;
                               if (!pid) {
-                                setMsg({ type: "error", text: "No plot linked to this burial request yet." });
+                                setMsg({
+                                  type: "error",
+                                  text: "No plot linked to this burial request yet.",
+                                });
                                 return;
                               }
                               setManualPlotId(String(pid));
@@ -1664,8 +1894,34 @@ export default function Inquire() {
                             View on map
                           </Button>
 
+                          <Button
+                            variant="outline"
+                            className="gap-2"
+                            onClick={() => openDeathCert(r)}
+                            disabled={isCancelled}
+                          >
+                            <UploadCloud className="h-4 w-4" />
+                            {r.death_certificate_url ? "Replace certificate" : "Upload certificate"}
+                          </Button>
+
+                          {/* ✅ VIEW in MODAL (no new page) */}
+                          {r.death_certificate_url ? (
+                            <Button
+                              variant="secondary"
+                              className="gap-2"
+                              onClick={() => openViewCert(r)}
+                            >
+                              <FileText className="h-4 w-4" />
+                              View certificate
+                            </Button>
+                          ) : null}
+
                           {!isCancelled && (
-                            <Button variant="secondary" onClick={() => cancelBurial(r.id)} className="gap-2">
+                            <Button
+                              variant="secondary"
+                              onClick={() => cancelBurial(r.id)}
+                              className="gap-2"
+                            >
                               <XCircle className="h-4 w-4" />
                               Cancel request
                             </Button>
@@ -1751,6 +2007,192 @@ export default function Inquire() {
             </Button>
             <Button onClick={sendFeedback} disabled={sendingFeedback || !feedbackTarget}>
               {sendingFeedback ? "Submitting…" : "Submit feedback"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Death Certificate VIEW dialog (modal preview) */}
+      <Dialog open={viewCertOpen} onOpenChange={(o) => (!o ? closeViewCert() : setViewCertOpen(true))}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Death Certificate</DialogTitle>
+            <DialogDescription>Preview the uploaded certificate inside this modal.</DialogDescription>
+          </DialogHeader>
+
+          {viewCertTarget ? (
+            <div className="space-y-4">
+              <div className="rounded-xl border bg-slate-50 p-3">
+                <div className="text-sm font-medium text-slate-900">
+                  {viewCertTarget.deceased_name || "Burial Request"}
+                </div>
+                <div className="text-xs text-slate-600 mt-1">Request #{viewCertTarget.id}</div>
+
+                {viewCertUrl ? (
+                  <div className="mt-2 text-xs text-slate-600">
+                    File type:{" "}
+                    <span className="font-medium text-slate-800">
+                      {viewCertKind === "pdf" ? "PDF" : viewCertKind === "image" ? "Image" : "File"}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-slate-600">No certificate found.</div>
+                )}
+              </div>
+
+              {viewCertUrl ? (
+                viewCertKind === "image" ? (
+                  <div className="rounded-xl border bg-white overflow-hidden">
+                    <img
+                      src={viewCertUrl}
+                      alt="Death certificate"
+                      className="w-full max-h-[72vh] object-contain"
+                      loading="lazy"
+                    />
+                  </div>
+                ) : viewCertKind === "pdf" ? (
+                  <div className="rounded-xl border bg-white overflow-hidden">
+                    <iframe
+                      title="Death certificate PDF preview"
+                      src={viewCertUrl}
+                      className="w-full h-[72vh]"
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-xl border bg-white p-3 text-sm text-slate-700">
+                    Preview not available for this file type.
+                  </div>
+                )
+              ) : null}
+            </div>
+          ) : null}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={closeViewCert}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Death Certificate UPLOAD dialog (also previews current + selected) */}
+      <Dialog open={deathCertOpen} onOpenChange={(o) => (!o ? closeDeathCert() : setDeathCertOpen(true))}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Upload Death Certificate</DialogTitle>
+            <DialogDescription>
+              Upload a JPG/PNG/WEBP image or PDF (max 12MB). If a certificate already exists, it will
+              be previewed here.
+            </DialogDescription>
+          </DialogHeader>
+
+          {deathCertTarget ? (
+            <div className="space-y-4">
+              <div className="rounded-xl border bg-slate-50 p-3">
+                <div className="text-sm font-medium text-slate-900">
+                  {deathCertTarget.deceased_name || "Burial Request"}
+                </div>
+                <div className="text-xs text-slate-600 mt-1">Request #{deathCertTarget.id}</div>
+
+                {currentDeathCertUrl ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    <span className="font-medium">Current file:</span>
+                    <span className="font-medium text-slate-800">Uploaded</span>
+                    <span className="text-slate-400">•</span>
+                    <span className="text-slate-500">
+                      {currentDeathCertKind === "pdf"
+                        ? "PDF"
+                        : currentDeathCertKind === "image"
+                        ? "Image"
+                        : "File"}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-slate-600">No certificate uploaded yet.</div>
+                )}
+              </div>
+
+              {/* ✅ CURRENT uploaded certificate preview */}
+              {currentDeathCertUrl ? (
+                <div className="space-y-2">
+                  <div className="text-sm font-semibold text-slate-800">Current certificate</div>
+
+                  {currentDeathCertKind === "image" ? (
+                    <div className="rounded-xl border bg-white overflow-hidden">
+                      <img
+                        src={currentDeathCertUrl}
+                        alt="Death certificate"
+                        className="w-full max-h-[60vh] object-contain"
+                        loading="lazy"
+                      />
+                    </div>
+                  ) : currentDeathCertKind === "pdf" ? (
+                    <div className="rounded-xl border bg-white overflow-hidden">
+                      <iframe
+                        title="Death certificate PDF preview"
+                        src={currentDeathCertUrl}
+                        className="w-full h-[60vh]"
+                      />
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border bg-white p-3 text-sm text-slate-700">
+                      Preview not available for this file type.
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {/* file picker */}
+              <div className="space-y-2">
+                <Label>Select file</Label>
+                <Input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  onChange={(e) => setDeathCertFile(e.target.files?.[0] || null)}
+                />
+                <div className="text-xs text-slate-500">Allowed: JPG, PNG, WEBP, PDF</div>
+              </div>
+
+              {/* ✅ SELECTED file preview (before upload) */}
+              {selectedDeathCertPreviewUrl ? (
+                <div className="space-y-2">
+                  <div className="text-sm font-semibold text-slate-800">Selected file preview</div>
+
+                  {selectedDeathCertKind === "image" ? (
+                    <div className="rounded-xl border bg-white overflow-hidden">
+                      <img
+                        src={selectedDeathCertPreviewUrl}
+                        alt="Selected death certificate"
+                        className="w-full max-h-[60vh] object-contain"
+                      />
+                    </div>
+                  ) : selectedDeathCertKind === "pdf" ? (
+                    <div className="rounded-xl border bg-white overflow-hidden">
+                      <iframe
+                        title="Selected certificate PDF preview"
+                        src={selectedDeathCertPreviewUrl}
+                        className="w-full h-[60vh]"
+                      />
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border bg-white p-3 text-sm text-slate-700">
+                      Preview not available for this file type.
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={closeDeathCert} disabled={deathCertUploading}>
+              Cancel
+            </Button>
+            <Button
+              onClick={uploadDeathCert}
+              disabled={deathCertUploading || !deathCertTarget || !deathCertFile}
+            >
+              {deathCertUploading ? "Uploading…" : "Upload"}
             </Button>
           </DialogFooter>
         </DialogContent>
