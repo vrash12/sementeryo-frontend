@@ -1,24 +1,24 @@
 FROM node:20-alpine AS build
-WORKDIR /repo
+WORKDIR /app
 
-# Copy root manifests (lockfile is here)
-COPY package.json package-lock.json ./
+# copy manifests first for caching
+COPY package*.json ./
 
-# Copy workspace package.json so npm can resolve the workspace without copying all sources yet
-COPY frontend/package.json ./frontend/package.json
-
-# Install using the root lockfile (workspaces-aware)
+# if you have package-lock.json committed -> use npm ci
 RUN npm install
 
-# Now copy the rest of the repo (or at least frontend)
+# then copy source
 COPY . .
 
-# Build the frontend (pick ONE of these depending on how scripts are set up)
-# Option 1: if root package.json has "workspaces": [...]
-RUN npm --workspace frontend run build
+ARG VITE_API_BASE_URL
+ARG VITE_API_BASE_URL_IMAGE
+ARG VITE_GOOGLE_MAPS_API_KEY
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_API_BASE_URL_IMAGE=$VITE_API_BASE_URL_IMAGE
+ENV VITE_GOOGLE_MAPS_API_KEY=$VITE_GOOGLE_MAPS_API_KEY
 
-# Option 2 (if your workspace name is different than folder), you may need:
-# RUN npm --workspace <workspace-name> run build
+RUN npm run build
 
 FROM nginx:alpine
-COPY --from=build /repo/frontend/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
