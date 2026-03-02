@@ -10,7 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@deck.gl/core": "^9.2.10",
     "@deck.gl/google-maps": "^9.2.10",
+    "@deck.gl/layers": "^9.2.10",
     "@emailjs/browser": "^4.4.1",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-avatar": "^1.1.10",
