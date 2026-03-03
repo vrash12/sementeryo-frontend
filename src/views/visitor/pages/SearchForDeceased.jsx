@@ -14,29 +14,13 @@ import { NavLink } from "react-router-dom";
 import fetchBurialRecords from "../js/get-burial-records";
 import { buildGraph, buildRoutedPolyline, fmtDistance } from "../js/dijkstra-pathfinding";
 
-import CemeteryMap, {
-  CEMETERY_CENTER,
-  INITIAL_ROAD_SEGMENTS,
-} from "../../../components/map/CemeteryMap";
+import CemeteryMap, { CEMETERY_CENTER, INITIAL_ROAD_SEGMENTS } from "../../../components/map/CemeteryMap";
 
 // shadcn/ui
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "../../../components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "../../../components/ui/dialog";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../../components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../../../components/ui/dialog";
 
 // =========================== UI COPY ===========================
 const MEMORIAL_QUOTE = "To live in hearts we leave behind is not to die.";
@@ -616,14 +600,6 @@ export default function SearchForDeceased() {
   const [routePath, setRoutePath] = useState([]);
   const [routeSteps, setRouteSteps] = useState([]);
 
-  // ✅ Arrival modal when user reaches destination
-  const ARRIVAL_THRESHOLD_M = 15; // meters (adjust: 10–25m typical)
-  const [arrivedModalOpen, setArrivedModalOpen] = useState(false);
-  const [arrivalDistanceM, setArrivalDistanceM] = useState(null);
-
-  // prevents modal from repeatedly opening on every GPS update
-  const arrivedOnceRef = useRef(false);
-
   const hasGoodLocationRef = useRef(false);
 
   const geoWatchIdRef = useRef(null);
@@ -641,80 +617,45 @@ export default function SearchForDeceased() {
   const fileRef = useRef(null);
   const canvasRef = useRef(null);
 
-  // ✅ 3D (tilt) toggle
-  const [is3D, setIs3D] = useState(false);
-  const [is3DSupported, setIs3DSupported] = useState(true);
-
   // map instance for UX controls
   const mapRef = useRef(null);
+  const handleMapLoad = useCallback((map) => {
+    mapRef.current = map;
+  }, []);
 
-  const apply3D = useCallback(
-    (map, enabled) => {
-      const g = window.google?.maps;
-      if (!map || !g) return;
-
-      // If you enable 3D but the area doesn't support 45° tilt,
-      // Google keeps tilt at 0 (so it looks "2D" even if your UI says ON).
-      const ensureTilt = () => {
-        const z = map.getZoom?.() ?? 19;
-        if (z < 18) map.setZoom?.(18);
-
-        if (enabled) {
-          // ✅ Most reliable: HYBRID/SATELLITE supports 45° tilt more often than ROADMAP
-          map.setMapTypeId?.("hybrid");
-          map.setHeading?.(map.getHeading?.() ?? 0);
-          map.setTilt?.(45);
-        } else {
-          map.setTilt?.(0);
-          map.setHeading?.(0);
-          map.setMapTypeId?.("roadmap");
-        }
-      };
-
-      // Apply now + once tiles settle
-      ensureTilt();
-      g.event.addListenerOnce(map, "idle", () => {
-        ensureTilt();
-
-        // Check if tilt actually applied
-        const t = map.getTilt?.() ?? 0;
-        if (enabled && t !== 45) {
-          setIs3DSupported(false);
-          // Optional status hint (won't block anything)
-          setRouteStatus(
-            "3D tilt is not available for this map view/location (Google kept tilt at 0). The map may stay flat."
-          );
-        } else {
-          setIs3DSupported(true);
-        }
-      });
-    },
-    [setRouteStatus]
-  );
-
-  const handleMapLoad = useCallback(
-    (map) => {
-      mapRef.current = map;
-      apply3D(map, is3D);
-    },
-    [apply3D, is3D]
-  );
-
+  // ✅ Login state check (reactive)
+// - Reads auth on mount
+// - Updates when auth changes (same tab via custom event; other tabs via storage)
+// - Updates on window focus (common after login redirect)
   useEffect(() => {
-    if (!mapRef.current) return;
-    apply3D(mapRef.current, is3D);
-  }, [is3D, apply3D]);
+    const compute = () => {
+      try {
+        const raw = localStorage.getItem("auth");
+        const parsed = raw ? JSON.parse(raw) : null;
+        const token = parsed?.accessToken || parsed?.token || parsed?.jwt || parsed?.access_token || "";
+        return Boolean(token);
+      } catch {
+        return false;
+      }
+    };
 
-  // ✅ Login state check (added)
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("auth");
-      const parsed = raw ? JSON.parse(raw) : null;
-      const token = parsed?.accessToken || parsed?.token || parsed?.jwt || "";
-      setIsLoggedIn(Boolean(token));
-    } catch {
-      setIsLoggedIn(false);
-    }
+    const sync = () => setIsLoggedIn(compute());
+
+    sync();
+
+    const onStorage = (e) => {
+      if (e.key === "auth") sync();
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("auth:changed", sync);
+    window.addEventListener("focus", sync);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("auth:changed", sync);
+      window.removeEventListener("focus", sync);
+    };
   }, []);
 
   // -------------------------- Build graph on mount --------------------------
@@ -768,32 +709,6 @@ export default function SearchForDeceased() {
       ac.abort();
     };
   }, []);
-
-  // ✅ Arrival detection: open modal when close enough to destination
-  useEffect(() => {
-    // Must be logged in to use live routing features
-    if (!isLoggedIn) return;
-
-    // Need a destination pinned
-    if (!mapCoords) {
-      setArrivalDistanceM(null);
-      arrivedOnceRef.current = false;
-      setArrivedModalOpen(false);
-      return;
-    }
-
-    // Need real GPS
-    if (locationSource !== "gps" || !userLocation) return;
-
-    const d = haversineDistanceM(userLocation, mapCoords);
-    setArrivalDistanceM(d);
-
-    // If within threshold and modal not yet shown for this destination
-    if (d <= ARRIVAL_THRESHOLD_M && !arrivedOnceRef.current) {
-      arrivedOnceRef.current = true;
-      setArrivedModalOpen(true);
-    }
-  }, [isLoggedIn, mapCoords, userLocation, locationSource]);
 
   // -------------------------- Load plots GeoJSON --------------------------
   useEffect(() => {
@@ -894,7 +809,7 @@ export default function SearchForDeceased() {
       }
 
       if (!isSecureForDeviceAPIs()) {
-        setRouteStatus("Location blocked by browser (needs HTTPS or localhost). Routing is unavailable.");
+        setRouteStatus(`Location blocked: this page must be HTTPS or localhost to use GPS. Current: ${window.location.origin}`);
         setIsRequestingLoc(false);
         return;
       }
@@ -1008,12 +923,17 @@ export default function SearchForDeceased() {
 
         setRouteStatus("Computing route along cemetery roads...");
 
-        const { polyline, distance, steps, debug } = await buildRoutedPolyline(routingStart, mapCoords, graph, {
-          userM: 25,
-          destM: 25,
-          snapMaxM: 80,
-          allowFallback: false,
-        });
+        const { polyline, distance, steps, debug } = await buildRoutedPolyline(
+          routingStart,
+          mapCoords,
+          graph,
+          {
+            userM: 25,
+            destM: 25,
+            snapMaxM: 80,
+            allowFallback: false,
+          }
+        );
 
         if (cancelled) return;
 
@@ -1039,6 +959,7 @@ export default function SearchForDeceased() {
     };
   }, [isLoggedIn, mapCoords, routingStart, graph]);
 
+  // ------------------------- Helpers: reset UI state ------------------------
   const resetAll = useCallback(() => {
     setNotFoundMsg("");
     setResults([]);
@@ -1051,11 +972,6 @@ export default function SearchForDeceased() {
     setRouteDistance(0);
     setRouteSteps([]);
     setRouteStatus("");
-
-    // ✅ reset arrival modal
-    setArrivedModalOpen(false);
-    setArrivalDistanceM(null);
-    arrivedOnceRef.current = false;
   }, []);
 
   const switchMode = useCallback(
@@ -1156,10 +1072,6 @@ export default function SearchForDeceased() {
 
     setScanResult(null);
     setSelected(row || null);
-    // ✅ new destination selected => allow arrival modal again
-    arrivedOnceRef.current = false;
-    setArrivedModalOpen(false);
-    setArrivalDistanceM(null);
 
     const parsed = parseLatLngFromToken(row?.qr_token);
 
@@ -1406,11 +1318,6 @@ export default function SearchForDeceased() {
 
     resetAll();
     setMode("qr");
-
-    // ✅ new destination via QR => allow arrival modal again
-    arrivedOnceRef.current = false;
-    setArrivedModalOpen(false);
-    setArrivalDistanceM(null);
 
     const parsed = parseLatLngFromToken(text);
 
@@ -1848,9 +1755,8 @@ export default function SearchForDeceased() {
                 <div>
                   <div className="font-semibold text-amber-900">Login required</div>
                   <div className="text-sm text-amber-800 mt-0.5">
-                    Please login to use <span className="font-semibold">Search</span>,{" "}
-                    <span className="font-semibold">QR Scan</span>, and{" "}
-                    <span className="font-semibold">Live Location routing</span>.
+                    Please login to use <span className="font-semibold">Search</span>, <span className="font-semibold">QR Scan</span>,
+                    and <span className="font-semibold">Live Location routing</span>.
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -1942,7 +1848,9 @@ export default function SearchForDeceased() {
                         className="h-11 rounded-xl"
                         disabled={!isLoggedIn}
                       />
-                      <div className="mt-1 text-xs text-slate-500">Tip: You can type partial names. Results are fuzzy matched.</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Tip: You can type partial names. Results are fuzzy matched.
+                      </div>
                     </div>
 
                     <div className="sm:col-span-1 lg:col-span-1 flex gap-2 items-end">
@@ -1969,7 +1877,11 @@ export default function SearchForDeceased() {
                       <div className="text-sm text-slate-600 mt-1">
                         Step 1: Scan or upload the QR. Step 2: Allow location. Step 3: View the grave pinned on the map.
                       </div>
-                      {!isLoggedIn && <div className="mt-2 text-xs text-amber-700">Login required to use QR scanning.</div>}
+                      {!isLoggedIn && (
+                        <div className="mt-2 text-xs text-amber-700">
+                          Login required to use QR scanning.
+                        </div>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2088,21 +2000,9 @@ export default function SearchForDeceased() {
                   <span className="rounded-full border bg-white/80 px-2.5 py-1 text-[11px] text-slate-700">
                     {mode === "qr" ? "via QR" : "via Name Search"}
                   </span>
-                  <span className="rounded-full border bg-white/80 px-2.5 py-1 text-[11px] text-slate-700">
-                    All graves shown
-                  </span>
+                  <span className="rounded-full border bg-white/80 px-2.5 py-1 text-[11px] text-slate-700">All graves shown</span>
                   <span className="rounded-full border bg-white/80 px-2.5 py-1 text-[11px] text-slate-700">
                     Amenities shown (CR + Parking)
-                  </span>
-                  <span
-                    className={[
-                      "rounded-full border bg-white/80 px-2.5 py-1 text-[11px]",
-                      is3D ? "text-emerald-700" : "text-slate-700",
-                    ].join(" ")}
-                    title={!is3DSupported && is3D ? "Google kept tilt at 0 (3D not available here)" : undefined}
-                  >
-                    3D: {is3D ? "ON" : "OFF"}
-                    {!is3DSupported && is3D ? " (not available)" : ""}
                   </span>
                 </CardTitle>
 
@@ -2152,15 +2052,6 @@ export default function SearchForDeceased() {
                     Enable Live Location
                   </Button>
 
-                  <Button
-                    variant="outline"
-                    onClick={() => setIs3D((v) => !v)}
-                    disabled={!isLoggedIn}
-                    className="rounded-xl"
-                  >
-                    {is3D ? "Disable 3D" : "Enable 3D"}
-                  </Button>
-
                   <Button variant="outline" onClick={fitCemetery} className="rounded-xl">
                     Fit Cemetery
                   </Button>
@@ -2191,19 +2082,18 @@ export default function SearchForDeceased() {
                 <div className="w-full h-[520px] rounded-2xl border overflow-hidden shadow-sm">
                   <CemeteryMap
                     clickable={false}
-                    // ✅ Prevent "Plot Details" modal from opening on polygon click for this page.
-                    // CemeteryMap only shows the modal when onEditPlot is NOT provided.
-                    onEditPlot={() => {}}
                     showLegend={false}
                     showGeofence={false}
                     showInitialRoads={false}
                     restrictToCemeteryBounds={restrictToCemeteryBounds}
                     polygons={[...amenityPolygons, ...plotPolygons]}
+                    // ✅ If no grave pinned yet, center on your GPS when available
                     center={mapCoords || userLocation || CEMETERY_CENTER}
                     zoom={mapCoords || userLocation ? 19 : 17}
                     markers={mapMarkers}
                     polylines={routeReady ? mapPolylines : []}
                     onMapLoad={handleMapLoad}
+                    // ✅ REMOVE footer buttons ("Close" + "Edit Details") on this page
                     detailsModalProps={{ showCloseButton: false, showEditButton: false }}
                   />
                 </div>
@@ -2240,7 +2130,9 @@ export default function SearchForDeceased() {
                         ))}
                       </ol>
                     ) : (
-                      <div className="mt-3 text-sm text-slate-500">Directions will appear once the route is ready.</div>
+                      <div className="mt-3 text-sm text-slate-500">
+                        Directions will appear once the route is ready.
+                      </div>
                     )}
                   </div>
                 )}
@@ -2319,8 +2211,7 @@ export default function SearchForDeceased() {
                   <div className="space-y-2">
                     {(() => {
                       const entries = qrDisplayEntries(scanDataForSelected);
-                      if (entries.length === 0)
-                        return <div className="text-sm text-slate-500">No displayable fields.</div>;
+                      if (entries.length === 0) return <div className="text-sm text-slate-500">No displayable fields.</div>;
                       return entries.map(({ key, label, value }) => (
                         <div key={key} className="text-sm">
                           <div className="text-slate-500">{label}</div>
@@ -2360,54 +2251,6 @@ export default function SearchForDeceased() {
           )}
         </div>
       </section>
-
-      {/* ✅ Arrival Modal */}
-      <Dialog open={arrivedModalOpen} onOpenChange={setArrivedModalOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
-          <DialogHeader>
-            <DialogTitle>✅ You have arrived</DialogTitle>
-            <DialogDescription>
-              You are now near the selected grave location.
-              {Number.isFinite(arrivalDistanceM) && (
-                <>
-                  {" "}
-                  (Approx. <span className="font-semibold">{Math.round(arrivalDistanceM)}m</span> away)
-                </>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="rounded-xl border bg-white/80 px-3 py-3 text-sm text-slate-700">
-            <div>
-              <span className="text-slate-500">Deceased:</span>{" "}
-              <span className="font-semibold">{deceasedNameResolved}</span>
-            </div>
-            <div className="mt-1">
-              <span className="text-slate-500">Plot:</span>{" "}
-              <span className="font-semibold">
-                {selected?.plot_id ?? scanResult?.matchedRow?.plot_id ?? scanResult?.plot_id ?? "N/A"}
-              </span>
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" className="rounded-xl" onClick={() => setArrivedModalOpen(false)}>
-              Close
-            </Button>
-
-            <Button
-              className="rounded-xl"
-              onClick={() => {
-                setArrivedModalOpen(false);
-                centerToGrave();
-              }}
-              disabled={!mapCoords}
-            >
-              Center to Grave
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Scan Modal */}
       <Dialog open={scanModalOpen} onOpenChange={(o) => (o ? setScanModalOpen(true) : closeScanModal())}>
@@ -2451,7 +2294,8 @@ export default function SearchForDeceased() {
 
           {scanMode === "upload" && (
             <div className="text-sm text-slate-600">
-              Processing image... {scanErr && <span className="text-rose-600 font-medium ml-2">{scanErr}</span>}
+              Processing image...{" "}
+              {scanErr && <span className="text-rose-600 font-medium ml-2">{scanErr}</span>}
             </div>
           )}
 
@@ -2486,8 +2330,8 @@ export default function SearchForDeceased() {
           <DialogHeader>
             <DialogTitle>Use Your Location?</DialogTitle>
             <DialogDescription>
-              If you allow location access, we will try to start the route from where you are. If you are far from the
-              cemetery, routing will not be computed until you are near the cemetery.
+              If you allow location access, we will try to start the route from where you are. If you are far from the cemetery,
+              routing will not be computed until you are near the cemetery.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">

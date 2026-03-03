@@ -66,8 +66,6 @@ function StatusBadge({ status }) {
     rejected: "bg-rose-100 text-rose-800 border-rose-200",
     canceled: "bg-slate-100 text-slate-700 border-slate-200",
     cancelled: "bg-slate-100 text-slate-700 border-slate-200",
-
-    // reservation statuses
     reserved: "bg-amber-100 text-amber-800 border-amber-200",
   };
 
@@ -164,7 +162,7 @@ export default function MyDeceasedFamily({ open, onOpenChange }) {
         setLoadingFamily(false);
       }
 
-      // ---- fetch reservations (so dialog isn't empty when user only reserved) ----
+      // ---- fetch reservations ----
       setLoadingReservations(true);
       try {
         const body = await fetchJson(ENDPOINTS.myReservations, { headers });
@@ -179,7 +177,14 @@ export default function MyDeceasedFamily({ open, onOpenChange }) {
     };
 
     run();
-  }, [open, userId, ENDPOINTS.myDeceasedFamily, ENDPOINTS.myReservations, ENDPOINTS.legacyFamily, headers]);
+  }, [
+    open,
+    userId,
+    ENDPOINTS.myDeceasedFamily,
+    ENDPOINTS.myReservations,
+    ENDPOINTS.legacyFamily,
+    headers,
+  ]);
 
   const handleDownloadQR = (_value, id) => {
     try {
@@ -216,7 +221,8 @@ export default function MyDeceasedFamily({ open, onOpenChange }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl bg-white/90 backdrop-blur border-white/60 shadow-2xl">
+      {/* ✅ scrollable dialog */}
+      <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto pr-2 bg-white/90 backdrop-blur border-white/60 shadow-2xl">
         <DialogHeader>
           <DialogTitle className="text-2xl bg-gradient-to-r from-emerald-600 via-cyan-600 to-blue-600 bg-clip-text text-transparent">
             My Deceased Family
@@ -236,18 +242,18 @@ export default function MyDeceasedFamily({ open, onOpenChange }) {
         ) : !hasAnything ? (
           <div className="text-center py-8 space-y-3">
             <div className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200">
-              <span className="text-slate-600">
-                No deceased records yet.
-              </span>
+              <span className="text-slate-600">No deceased records yet.</span>
             </div>
 
             <div className="text-sm text-slate-600">
-              This page shows <b>graves</b> and <b>burial requests</b>. A <b>reservation</b> won’t appear here until you submit a burial request (after approval) or the admin creates the grave record.
+              This page shows <b>graves</b> and <b>burial requests</b>. A{" "}
+              <b>reservation</b> won’t appear here until you submit a burial request
+              (after approval) or the admin creates the grave record.
             </div>
           </div>
         ) : (
           <div className="space-y-4">
-            {/* ===================== DECEASED FAMILY (graves + burial_requests) ===================== */}
+            {/* ===================== DECEASED FAMILY ===================== */}
             {family.length > 0 ? (
               <Tabs defaultValue={family[0]?.id?.toString()} className="w-full">
                 <div className="relative overflow-hidden border border-emerald-100 rounded-lg bg-gradient-to-br from-emerald-50/80 to-cyan-50/80 backdrop-blur p-2 shadow-md">
@@ -325,7 +331,7 @@ export default function MyDeceasedFamily({ open, onOpenChange }) {
               </div>
             )}
 
-            {/* ===================== RESERVATIONS (plot_reservations) ===================== */}
+            {/* ===================== RESERVATIONS ===================== */}
             <Card className="rounded-2xl overflow-hidden border-white/60 bg-white/80 backdrop-blur shadow-lg">
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg text-slate-900">My Reservations</CardTitle>

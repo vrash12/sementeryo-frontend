@@ -13,7 +13,6 @@ import {
   BookOpenCheck,
   CalendarCheck2,
   Ticket,
-  Search,
   Menu,
   ChevronLeft,
   LogOut,
@@ -170,17 +169,7 @@ export default function Sidebar() {
             </Button>
           </CardHeader>
 
-          <CardContent className="relative">
-            <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50/50 to-cyan-50/50 px-3 py-2 shadow-inner backdrop-blur">
-              <Search size={16} className="text-emerald-500" />
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search..."
-                className="border-0 bg-transparent focus-visible:ring-0 text-sm placeholder:text-slate-400"
-              />
-            </div>
-          </CardContent>
+       
         </Card>
 
         <ScrollArea className="flex-1 px-3 pt-2">

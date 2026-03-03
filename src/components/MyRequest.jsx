@@ -1,5 +1,5 @@
 // frontend/src/components/MyRequest.jsx
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -49,12 +49,23 @@ function readAuth() {
 }
 
 function getToken(auth) {
-  return auth?.accessToken || auth?.token || auth?.jwt || "";
+  return auth?.accessToken || auth?.token || auth?.jwt || auth?.access_token || "";
 }
 
 function getUserId(auth) {
   // backend expects visitor user id for :family_contact
-  return auth?.user?.id ?? auth?.user?.user_id ?? null;
+  const id =
+    auth?.user?.id ??
+    auth?.user?.user_id ??
+    auth?.user?.userId ??
+    auth?.id ??
+    auth?.user_id ??
+    auth?.userId ??
+    null;
+
+  // normalize numeric strings
+  if (typeof id === "string" && id.trim() !== "" && !Number.isNaN(Number(id))) return Number(id);
+  return id;
 }
 
 /* --------------------------- fetch helper --------------------------- */
@@ -156,8 +167,9 @@ function pickPlotLabel(r) {
    Component
 
    ✅ FIX INCLUDED:
-   - If you render <MyRequest /> as a PAGE (no props), it will open by default.
-   - If you render it as a MODAL (controlled), pass open/onOpenChange normally.
+   - Re-reads localStorage auth on open
+   - Listens to a custom "auth:changed" event (recommended to dispatch after login)
+   - Avoids stale auth from useMemo([])
 
 ============================================================================ */
 export default function MyRequest({ open: openProp, onOpenChange: onOpenChangeProp }) {
@@ -166,7 +178,40 @@ export default function MyRequest({ open: openProp, onOpenChange: onOpenChangePr
   const open = openProp ?? internalOpen;
   const onOpenChange = onOpenChangeProp ?? setInternalOpen;
 
-  const auth = useMemo(() => readAuth(), []);
+  const [auth, setAuth] = useState(() => readAuth());
+  const [authReady, setAuthReady] = useState(false);
+
+  const refreshAuth = useCallback(() => {
+    setAuth(readAuth());
+  }, []);
+
+  // Keep auth synced (best effort)
+  useEffect(() => {
+    // Same-tab localStorage changes don't fire "storage", so we also listen for a custom event.
+    const onStorage = (e) => {
+      if (e.key === "auth") setAuth(readAuth());
+    };
+    const onAuthChanged = () => setAuth(readAuth());
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("auth:changed", onAuthChanged);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("auth:changed", onAuthChanged);
+    };
+  }, []);
+
+  // Re-read auth whenever the dialog opens
+  useEffect(() => {
+    if (!open) {
+      setAuthReady(false);
+      return;
+    }
+    refreshAuth();
+    setAuthReady(true);
+  }, [open, refreshAuth]);
+
   const token = useMemo(() => getToken(auth), [auth]);
   const requestOwnerId = useMemo(() => getUserId(auth), [auth]);
 
@@ -207,29 +252,50 @@ export default function MyRequest({ open: openProp, onOpenChange: onOpenChangePr
     [API_BASES]
   );
 
+  const ensureFreshAuthOrShowError = useCallback(() => {
+    const latest = readAuth();
+    const latestToken = getToken(latest);
+    const latestId = getUserId(latest);
+
+    if (!latestId) {
+      setMsg({ type: "error", text: "Missing user id. Please login again." });
+      return { ok: false, token: "", id: null };
+    }
+    if (!latestToken) {
+      setMsg({ type: "error", text: "Missing token. Please login again." });
+      return { ok: false, token: "", id: latestId };
+    }
+
+    // sync state if it changed
+    if (latest) setAuth(latest);
+
+    return { ok: true, token: latestToken, id: latestId };
+  }, []);
+
   const fetchList = useCallback(
     async (which) => {
-      if (!requestOwnerId) {
-        setMsg({ type: "error", text: "Missing user id, please login again." });
-        return;
-      }
-      if (!token) {
-        setMsg({ type: "error", text: "Missing token, please login again." });
-        return;
-      }
+      // Use latest auth (prevents stale state if auth just changed)
+      const checked = ensureFreshAuthOrShowError();
+      if (!checked.ok) return;
 
       const setList = which === "burial" ? setBurial : setMaintenance;
 
       const urls =
         which === "burial"
-          ? expandUrls(PATHS.burialList(requestOwnerId))
-          : expandUrls(PATHS.maintenanceList(requestOwnerId));
+          ? expandUrls(PATHS.burialList(checked.id))
+          : expandUrls(PATHS.maintenanceList(checked.id));
 
       setLoading((l) => ({ ...l, [which]: true }));
       setMsg({ type: "", text: "" });
 
       try {
-        const { body } = await fetchFirstOk(urls, { headers });
+        const reqHeaders = {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${checked.token}`,
+        };
+
+        const { body } = await fetchFirstOk(urls, { headers: reqHeaders });
         const rows = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
         setList(rows);
       } catch (err) {
@@ -242,14 +308,23 @@ export default function MyRequest({ open: openProp, onOpenChange: onOpenChangePr
         setLoading((l) => ({ ...l, [which]: false }));
       }
     },
-    [expandUrls, headers, requestOwnerId, token]
+    [ensureFreshAuthOrShowError, expandUrls]
   );
 
+  // Fetch when opened + auth is ready
   useEffect(() => {
-    if (!open) return;
+    if (!open || !authReady) return;
+
+    // If still missing after refresh, show message once
+    if (!token || !requestOwnerId) {
+      // keep message simple (avoid confusion)
+      setMsg({ type: "error", text: "Please login again." });
+      return;
+    }
+
     fetchList("burial");
     fetchList("maintenance");
-  }, [open, fetchList]);
+  }, [open, authReady, token, requestOwnerId, fetchList]);
 
   async function handleCancel(which, id) {
     setMsg({ type: "", text: "" });
@@ -268,22 +343,31 @@ export default function MyRequest({ open: openProp, onOpenChange: onOpenChangePr
     );
 
     try {
+      const checked = ensureFreshAuthOrShowError();
+      if (!checked.ok) throw new Error("Not authenticated");
+
       const urls =
         which === "burial"
           ? expandUrls(PATHS.cancelBurial(id))
           : expandUrls(PATHS.cancelMaintenance(id));
 
+      const reqHeaders = {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${checked.token}`,
+      };
+
       // try PATCH first, fallback to POST
       try {
         await fetchFirstOk(urls, {
           method: "PATCH",
-          headers,
+          headers: reqHeaders,
           body: JSON.stringify({ reason: "user-cancelled" }),
         });
       } catch {
         await fetchFirstOk(urls, {
           method: "POST",
-          headers,
+          headers: reqHeaders,
           body: JSON.stringify({ reason: "user-cancelled" }),
         });
       }
@@ -373,12 +457,7 @@ export default function MyRequest({ open: openProp, onOpenChange: onOpenChangePr
               </Button>
             </div>
 
-            <RequestGrid
-              type="burial"
-              rows={burial}
-              loading={loading.burial}
-              onCancel={handleCancel}
-            />
+            <RequestGrid type="burial" rows={burial} loading={loading.burial} onCancel={handleCancel} />
           </TabsContent>
 
           <TabsContent value="maintenance" className="mt-4 space-y-3">
@@ -591,9 +670,7 @@ function RequestGrid({ type, rows, loading, onCancel }) {
                           <Flag className="h-4 w-4 text-slate-400" />
                           <span className="truncate">
                             Priority:{" "}
-                            <span className="font-medium text-slate-800">
-                              {r.priority || "—"}
-                            </span>
+                            <span className="font-medium text-slate-800">{r.priority || "—"}</span>
                           </span>
                         </div>
 

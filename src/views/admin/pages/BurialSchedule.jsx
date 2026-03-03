@@ -44,6 +44,9 @@ import {
   Upload,
   ExternalLink,
   Download,
+  ChevronLeft,
+  ChevronRight,
+  Calendar as CalendarIcon,
 } from "lucide-react";
 
 import { Toaster, toast } from "sonner";
@@ -483,6 +486,188 @@ async function uploadDeathCertificateForRequest(requestId, file) {
 }
 
 /* =========================================================================================
+   Calendar helpers (Upcoming Burials)
+========================================================================================= */
+function toYmdLocal(d) {
+  if (!(d instanceof Date)) d = new Date(d);
+  if (Number.isNaN(d.getTime())) return null;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+function parseToLocalDate(dateLike) {
+  if (!dateLike) return null;
+  const raw = String(dateLike).trim();
+  if (!raw) return null;
+
+  // if it looks like YYYY-MM-DD, force local midnight (avoid TZ shift)
+  const ymd = raw.includes("T") ? raw.split("T")[0] : raw;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+    const d = new Date(`${ymd}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function startOfMonth(d) {
+  const x = new Date(d);
+  x.setDate(1);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function addMonths(d, n) {
+  const x = new Date(d);
+  x.setMonth(x.getMonth() + n);
+  return x;
+}
+function sameDay(a, b) {
+  return (
+    a?.getFullYear?.() === b?.getFullYear?.() &&
+    a?.getMonth?.() === b?.getMonth?.() &&
+    a?.getDate?.() === b?.getDate?.()
+  );
+}
+function monthLabel(d) {
+  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+function buildMonthGrid(monthDate /* 1st of month */) {
+  const first = startOfMonth(monthDate);
+  const dow = first.getDay(); // 0..6 (Sun..Sat)
+  const gridStart = new Date(first);
+  gridStart.setDate(first.getDate() - dow);
+
+  const days = [];
+  for (let i = 0; i < 42; i++) {
+    const x = new Date(gridStart);
+    x.setDate(gridStart.getDate() + i);
+    days.push(x);
+  }
+  return days;
+}
+
+function UpcomingBurialsCalendar({
+  upcomingByYmd,
+  selectedYmd,
+  onSelectYmd,
+  month,
+  onPrevMonth,
+  onNextMonth,
+  onToday,
+}) {
+  const today = useMemo(() => startOfDay(new Date()), []);
+  const monthStart = useMemo(() => startOfMonth(month), [month]);
+
+  const gridDays = useMemo(() => buildMonthGrid(monthStart), [monthStart]);
+
+  return (
+    <Card className="rounded-2xl border bg-white shadow-sm">
+      <CardHeader className="pb-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <CalendarIcon className="h-5 w-5 text-slate-500" />
+              <CardTitle className="text-lg">Upcoming Burials Calendar</CardTitle>
+            </div>
+            <CardDescription>
+              Click a date to view scheduled/expected burials that day (from burial requests).
+            </CardDescription>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1" onClick={onPrevMonth}>
+              <ChevronLeft className="h-4 w-4" />
+              Prev
+            </Button>
+            <Button variant="outline" size="sm" onClick={onToday}>
+              Today
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1" onClick={onNextMonth}>
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-2 text-sm font-semibold text-slate-800">{monthLabel(monthStart)}</div>
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        {/* Weekday headers */}
+        <div className="grid grid-cols-7 gap-2 text-xs font-medium text-slate-500">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((w) => (
+            <div key={w} className="text-center">
+              {w}
+            </div>
+          ))}
+        </div>
+
+        {/* Grid */}
+        <div className="grid grid-cols-7 gap-2">
+          {gridDays.map((d) => {
+            const ymd = toYmdLocal(d);
+            const inMonth = d.getMonth() === monthStart.getMonth();
+            const isToday = sameDay(d, today);
+            const isSelected = selectedYmd && ymd === selectedYmd;
+
+            const items = upcomingByYmd.get(ymd) || [];
+            const count = items.length;
+
+            return (
+              <button
+                key={ymd}
+                type="button"
+                onClick={() => onSelectYmd(ymd)}
+                className={[
+                  "relative rounded-xl border p-2 text-left transition",
+                  "hover:bg-slate-50",
+                  inMonth ? "bg-white" : "bg-slate-50/60 text-slate-400",
+                  isSelected ? "border-sky-400 ring-2 ring-sky-100" : "border-slate-200",
+                ].join(" ")}
+                title={count ? `${count} upcoming burial(s)` : "No upcoming burials"}
+              >
+                <div className="flex items-center justify-between">
+                  <div
+                    className={[
+                      "text-xs font-semibold",
+                      isToday ? "text-emerald-700" : "text-slate-700",
+                    ].join(" ")}
+                  >
+                    {d.getDate()}
+                  </div>
+
+                  {isToday ? (
+                    <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-semibold text-white">
+                      Today
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* dot + count */}
+                {count ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="inline-block h-2 w-2 rounded-full bg-emerald-600" />
+                    <span className="text-[11px] font-medium text-slate-700">{count}</span>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-[11px] text-slate-400">—</div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* =========================================================================================
    Page main
 ========================================================================================= */
 export default function BurialSchedule() {
@@ -517,6 +702,10 @@ function BurialScheduleInner() {
 
   const [apiError, setApiError] = useState(null);
   const [runtimeErrors, setRuntimeErrors] = useState([]);
+
+  // Calendar state
+  const [calMonth, setCalMonth] = useState(() => startOfMonth(new Date()));
+  const [selectedYmd, setSelectedYmd] = useState(() => toYmdLocal(new Date()));
 
   useEffect(() => {
     const onError = (ev) => {
@@ -749,6 +938,75 @@ function BurialScheduleInner() {
     }
   };
 
+  /* ==========================
+     Upcoming burials data (Calendar)
+     - Uses burial_requests rows as source
+     - Includes only: future-dated + (pending/confirmed)
+     ========================== */
+  const upcomingByYmd = useMemo(() => {
+    const map = new Map();
+    const today0 = startOfDay(new Date()).getTime();
+
+    for (const r of rows) {
+      const st = safeLower(r?.status);
+      if (!(st === "pending" || st === "confirmed")) continue;
+
+      const d = parseToLocalDate(pickReqDate(r));
+      if (!d) continue;
+
+      // upcoming (today and future)
+      const t0 = startOfDay(d).getTime();
+      if (t0 < today0) continue;
+
+      const ymd = toYmdLocal(d);
+      if (!ymd) continue;
+
+      if (!map.has(ymd)) map.set(ymd, []);
+      map.get(ymd).push(r);
+    }
+
+    // sort each day
+    for (const [k, list] of map.entries()) {
+      list.sort((a, b) => {
+        const da = parseToLocalDate(pickReqDate(a))?.getTime?.() ?? 0;
+        const db = parseToLocalDate(pickReqDate(b))?.getTime?.() ?? 0;
+        if (da !== db) return da - db;
+
+        const ta = String(pickReqTime(a) || "");
+        const tb = String(pickReqTime(b) || "");
+        return ta.localeCompare(tb);
+      });
+      map.set(k, list);
+    }
+
+    return map;
+  }, [rows]);
+
+  const selectedDayItems = useMemo(() => {
+    if (!selectedYmd) return [];
+    return upcomingByYmd.get(selectedYmd) || [];
+  }, [upcomingByYmd, selectedYmd]);
+
+  const onSelectYmd = useCallback(
+    (ymd) => {
+      setSelectedYmd(ymd);
+
+      // if user clicked a day not in current month grid month, keep month same (simple)
+      // but: if ymd belongs to another month visible on grid, jump to that month for clarity
+      const d = parseToLocalDate(ymd);
+      if (d) setCalMonth(startOfMonth(d));
+    },
+    [setSelectedYmd]
+  );
+
+  const onPrevMonth = useCallback(() => setCalMonth((m) => startOfMonth(addMonths(m, -1))), []);
+  const onNextMonth = useCallback(() => setCalMonth((m) => startOfMonth(addMonths(m, 1))), []);
+  const onToday = useCallback(() => {
+    const t = new Date();
+    setCalMonth(startOfMonth(t));
+    setSelectedYmd(toYmdLocal(t));
+  }, []);
+
   return (
     <div className="w-full">
       <Toaster richColors expand={false} />
@@ -791,8 +1049,122 @@ function BurialScheduleInner() {
           </div>
         </CardHeader>
 
-        <CardContent>
-          <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between mb-4">
+        <CardContent className="space-y-4">
+          {/* ✅ Calendar + Selected Day list */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <UpcomingBurialsCalendar
+              upcomingByYmd={upcomingByYmd}
+              selectedYmd={selectedYmd}
+              onSelectYmd={onSelectYmd}
+              month={calMonth}
+              onPrevMonth={onPrevMonth}
+              onNextMonth={onNextMonth}
+              onToday={onToday}
+            />
+
+            <Card className="rounded-2xl border bg-white shadow-sm lg:col-span-2">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-lg">Upcoming Burials on {selectedYmd || "—"}</CardTitle>
+                    <CardDescription>
+                      Click “View” to open details (and upload/view death certificate).
+                    </CardDescription>
+                  </div>
+                  <Badge variant="secondary" className="h-fit">
+                    {selectedDayItems.length} item(s)
+                  </Badge>
+                </div>
+              </CardHeader>
+
+              <CardContent>
+                {selectedDayItems.length === 0 ? (
+                  <div className="rounded-xl border bg-slate-50 p-4 text-sm text-slate-600">
+                    No upcoming burials for this date.
+                  </div>
+                ) : (
+                  <ScrollArea className="max-h-[34vh]">
+                    <div className="space-y-2 pr-2">
+                      {selectedDayItems.map((r) => {
+                        const status = safeLower(r?.status);
+                        const hasDC = !!getDeathCertPath(r);
+                        return (
+                          <div
+                            key={String(r.id) ?? `${r.deceased_name}-${Math.random()}`}
+                            className="rounded-xl border bg-white p-3 flex items-start justify-between gap-3"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-slate-900 truncate flex items-center gap-2">
+                                <span className="truncate">{r.deceased_name || "—"}</span>
+                                {hasDC ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] text-white">
+                                    <FileText className="h-3 w-3" />
+                                    DC
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 text-xs text-slate-600 flex flex-wrap gap-x-3 gap-y-1">
+                                <span className="inline-flex items-center gap-1">
+                                  <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
+                                  {fmtDateShort(pickReqDate(r))}
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                  <Clock3 className="h-3.5 w-3.5 text-slate-400" />
+                                  {fmtTime(pickReqTime(r))}
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                  <MapPin className="h-3.5 w-3.5 text-slate-400" />
+                                  {getReqPlotLabel(r)}
+                                </span>
+                              </div>
+                              <div className="mt-1 text-xs text-slate-500 truncate">
+                                {r.family_contact_name ||
+                                  r.family_contact_email ||
+                                  (r.family_contact ? `User #${r.family_contact}` : "—")}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full text-white ${statusBadgeClass(
+                                  r.status
+                                )}`}
+                              >
+                                {normalizeStatusLabel(r.status)}
+                              </span>
+
+                              <Button
+                                size="icon"
+                                variant="secondary"
+                                onClick={() => setViewItem(r)}
+                                title="View"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+
+                              {status === "pending" ? (
+                                <Button
+                                  size="icon"
+                                  className="bg-emerald-600 text-white hover:bg-emerald-700"
+                                  onClick={() => onConfirm(r)}
+                                  title="Confirm"
+                                >
+                                  <CheckCircle2 className="h-4 w-4" />
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Filters */}
+          <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
             <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
               <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
@@ -828,6 +1200,7 @@ function BurialScheduleInner() {
 
           <Separator className="my-2" />
 
+          {/* Table */}
           <div className="rounded-xl border bg-white">
             <div className="grid grid-cols-12 px-4 py-3 text-xs font-medium text-slate-500">
               <div className="col-span-3">Deceased Name</div>
@@ -938,6 +1311,7 @@ function BurialScheduleInner() {
             </ScrollArea>
           </div>
 
+          {/* Map */}
           <div className="mt-4 rounded-xl overflow-hidden border bg-white">
             <div className="px-4 py-3">
               <div className="text-sm font-medium text-slate-800">Plot Map</div>
