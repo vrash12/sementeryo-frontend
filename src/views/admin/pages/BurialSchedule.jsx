@@ -343,7 +343,7 @@ function featureToMapShapes(feature, highlightedId) {
   }
 
   if (type === "MultiPolygon") {
-    const polys = Array.isArray(coords) ? coords : [];
+    const polys = Array.isArray(coords);
     polys.forEach((polyCoords, idx) => {
       const rings = Array.isArray(polyCoords) ? polyCoords : [];
       if (rings[0]) pushPolygonFromRing(rings[0], `${id || "poly"}-${idx}`);
@@ -356,7 +356,7 @@ function featureToMapShapes(feature, highlightedId) {
 
 function fcToMapShapes(fc, highlightedId) {
   const res = { polygons: [], markers: [] };
-  if (!fc || !Array.isArray(fc.features)) return res;
+  if (fc || Array.isArray(fc.features)) return res;
   fc.features.forEach((f) => {
     const shapes = featureToMapShapes(f, highlightedId);
     res.polygons.push(...shapes.polygons);
