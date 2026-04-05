@@ -292,6 +292,8 @@ const getFeatId = (f) => {
   return p.id != null ? String(p.id) : p.uid != null ? String(p.uid) : undefined;
 };
 
+
+
 function featureToMapShapes(feature, highlightedId) {
   const out = { polygons: [], markers: [] };
   if (!feature?.geometry) return out;
@@ -312,6 +314,7 @@ function featureToMapShapes(feature, highlightedId) {
 
   const pushPolygonFromRing = (ring, polyId) => {
     if (!Array.isArray(ring) || ring.length === 0) return;
+
     const path = ring
       .map((pair) => {
         const [lng, lat] = pair || [];
@@ -319,7 +322,8 @@ function featureToMapShapes(feature, highlightedId) {
         return { lat, lng };
       })
       .filter(Boolean);
-    if (path.length === 0) return;
+
+    if (!path.length) return;
 
     out.polygons.push({ id: polyId, path, options: baseOptions, properties, status });
   };
@@ -338,15 +342,19 @@ function featureToMapShapes(feature, highlightedId) {
 
   if (type === "Polygon") {
     const rings = Array.isArray(coords) ? coords : [];
-    if (rings[0]) pushPolygonFromRing(rings[0], id || `poly-${Math.random().toString(36).slice(2)}`);
+    if (rings[0]) {
+      pushPolygonFromRing(rings[0], id || `poly-${Math.random().toString(36).slice(2)}`);
+    }
     return out;
   }
 
   if (type === "MultiPolygon") {
-    const polys = Array.isArray(coords);
+    const polys = Array.isArray(coords) ? coords : [];
     polys.forEach((polyCoords, idx) => {
       const rings = Array.isArray(polyCoords) ? polyCoords : [];
-      if (rings[0]) pushPolygonFromRing(rings[0], `${id || "poly"}-${idx}`);
+      if (rings[0]) {
+        pushPolygonFromRing(rings[0], `${id || "poly"}-${idx}`);
+      }
     });
     return out;
   }
@@ -356,12 +364,15 @@ function featureToMapShapes(feature, highlightedId) {
 
 function fcToMapShapes(fc, highlightedId) {
   const res = { polygons: [], markers: [] };
-  if (fc || Array.isArray(fc.features)) return res;
+
+  if (!fc || !Array.isArray(fc.features)) return res;
+
   fc.features.forEach((f) => {
     const shapes = featureToMapShapes(f, highlightedId);
     res.polygons.push(...shapes.polygons);
     res.markers.push(...shapes.markers);
   });
+
   return res;
 }
 

@@ -1,12 +1,15 @@
 // frontend/src/views/visitor/pages/SearchForDeceased.jsx
-// ✅ Entrance, gate based routing has been removed.
+// ✅ Entrance walkthrough restored.
 // Notes:
-// - We no longer start routes from the cemetery entrance.
-// - If GPS permission is denied or unavailable, routing stays disabled.
-// - If your GPS is far from the cemetery, routing is not computed (because the road graph exists only inside the cemetery).
+// - This page now supports TWO ways to guide the visitor:
+//   1) Open Entrance Location (external map open to the cemetery entrance)
+//   2) Burial Plot Walkthrough (internal cemetery route from the entrance to the selected grave)
+// - Live GPS routing is still available as an optional third mode when the visitor enables location.
+// - If GPS permission is denied or unavailable, the entrance walkthrough still works.
+// - If your GPS is far from the cemetery, the internal live route is not computed (because the road graph exists only inside the cemetery).
 //
-// ✅ LOGIN NOTE (added):
-// - You must be logged in to use Search / QR Scan / Live Location routing features.
+// ✅ LOGIN NOTE:
+// - You must be logged in to use Search / QR Scan / routing features.
 // - The map can still render, but interactive features are disabled until you login.
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
@@ -465,6 +468,22 @@ const TARGET_PIN_SVG = `
 </svg>
 `;
 
+const ENTRANCE_PIN_SVG = `
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="s" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0b1220" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <g filter="url(#s)">
+    <path d="M32 4c-10.5 0-19 8.5-19 19 0 15 19 37 19 37s19-22 19-37C51 12.5 42.5 4 32 4z" fill="#7C3AED"/>
+    <path d="M22 18h20v14H22z" fill="#ffffff" opacity="0.95"/>
+    <path d="M26 22v10M38 22v10M22 24h20" stroke="#7C3AED" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M24 34h16" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>
+`;
+
 // --------------------------- Amenities (static) ---------------------------
 const COMFORT_ROOMS = [
   { id: "cr1", title: "Comfort Room 1", position: { lat: 15.495013, lng: 120.554517 } },
@@ -477,6 +496,9 @@ const PARKING_LOT_PATH = [
   { lat: 15.494264, lng: 120.554623 }, // bottom right
   { lat: 15.494736, lng: 120.554232 }, // bottom left
 ];
+
+const CEMETERY_ENTRANCE = { lat: 15.494603, lng: 120.554547 };
+
 
 const AMENITY_CR_PIN_SVG = `
 <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -604,6 +626,7 @@ export default function SearchForDeceased() {
 
   const geoWatchIdRef = useRef(null);
   const [mapCoords, setMapCoords] = useState(null);
+  const [routeMode, setRouteMode] = useState("entrance"); // "entrance" | "live"
 
   // ✅ tracks how location modal was closed to prevent accidental repeats
   const locationActionRef = useRef(null); // "allow" | null
@@ -753,14 +776,14 @@ export default function SearchForDeceased() {
   }, []);
 
   // -------------------------- Location modal logic --------------------------
-  // - If permission already granted, auto start GPS (no modal).
-  // - Otherwise, show modal when a destination exists.
-  // ✅ now requires login
+  // - Only used for LIVE routing.
+  // - Entrance walkthrough does not require GPS.
   useEffect(() => {
     let alive = true;
 
     if (!isLoggedIn) return;
     if (!mapCoords) return;
+    if (routeMode !== "live") return;
     if (userLocation) return;
     if (isRequestingLoc) return;
 
@@ -780,7 +803,7 @@ export default function SearchForDeceased() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn, mapCoords, userLocation, isRequestingLoc, locationConsent]);
+  }, [isLoggedIn, mapCoords, routeMode, userLocation, isRequestingLoc, locationConsent]);
 
   // ✅ GPS only, no entrance fallback
   const requestUserLocation = useCallback(
@@ -888,47 +911,92 @@ export default function SearchForDeceased() {
     [isLoggedIn, userLocation]
   );
 
-  // ✅ Routing start logic WITHOUT entrance:
-  // routingStart is only available when GPS exists.
+  const activateEntranceWalkthrough = useCallback(() => {
+    setRouteMode("entrance");
+    setLocationModalOpen(false);
+    if (!mapCoords) {
+      setRouteStatus("Select a grave first to start the burial plot walkthrough from the entrance.");
+      return;
+    }
+    setRouteStatus("Entrance walkthrough enabled. Computing route from the cemetery entrance...");
+  }, [mapCoords]);
+
+  const activateLiveWalkthrough = useCallback(async () => {
+    if (!isLoggedIn) {
+      setRouteStatus("Please login to enable Live Location routing.");
+      return;
+    }
+
+    setRouteMode("live");
+
+    if (userLocation && locationSource === "gps") {
+      setRouteStatus("Live location walkthrough enabled.");
+      return;
+    }
+
+    const state = await getGeoPermissionState();
+    if (state === "granted") {
+      requestUserLocation({ auto: true });
+      return;
+    }
+
+    setLocationModalOpen(true);
+    setRouteStatus("Allow location access to start live walkthrough.");
+  }, [isLoggedIn, userLocation, locationSource, requestUserLocation]);
+
+  const openEntranceLocation = useCallback(() => {
+    const url = `https://www.google.com/maps/search/?api=1&query=${CEMETERY_ENTRANCE.lat},${CEMETERY_ENTRANCE.lng}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, []);
+
+  // ✅ Routing start logic with two walkthrough modes:
+  // - entrance: internal route from cemetery entrance to grave
+  // - live: internal route from current GPS to grave
   const routingStart = useMemo(() => {
+    if (!mapCoords) return null;
+    if (routeMode === "entrance") return CEMETERY_ENTRANCE;
     if (!userLocation) return null;
     if (locationSource !== "gps") return null;
     return userLocation;
-  }, [userLocation, locationSource]);
+  }, [mapCoords, routeMode, userLocation, locationSource]);
 
   // -------------------------- Compute / update route ------------------------
   useEffect(() => {
     let cancelled = false;
 
-    // ✅ login required for routing
     if (!isLoggedIn) return;
     if (!mapCoords || !routingStart || !graph) return;
 
     (async () => {
       try {
-        // If user is far away, do not compute a cemetery-internal route
-        const dToCemetery = haversineDistanceM(routingStart, CEMETERY_CENTER);
-        const THRESHOLD_M = 2000;
-
         setRouteDistance(0);
         setRoutePath([]);
         setRouteSteps([]);
 
-        if (dToCemetery > THRESHOLD_M) {
-          setRouteStatus(
-            "Live GPS is enabled, but you are far from the cemetery. Routing will be available once you are near the cemetery."
-          );
-          return;
+        if (routeMode === "live") {
+          const dToCemetery = haversineDistanceM(routingStart, CEMETERY_CENTER);
+          const THRESHOLD_M = 2000;
+
+          if (dToCemetery > THRESHOLD_M) {
+            setRouteStatus(
+              "Live GPS is enabled, but you are far from the cemetery. Routing will be available once you are near the cemetery."
+            );
+            return;
+          }
         }
 
-        setRouteStatus("Computing route along cemetery roads...");
+        setRouteStatus(
+          routeMode === "entrance"
+            ? "Computing burial plot walkthrough from the cemetery entrance..."
+            : "Computing route along cemetery roads from your live location..."
+        );
 
         const { polyline, distance, steps, debug } = await buildRoutedPolyline(
           routingStart,
           mapCoords,
           graph,
           {
-            userM: 25,
+            userM: routeMode === "entrance" ? 35 : 25,
             destM: 25,
             snapMaxM: 80,
             allowFallback: false,
@@ -939,7 +1007,11 @@ export default function SearchForDeceased() {
 
         if (!polyline?.length) {
           console.warn("No route polyline. Debug:", debug);
-          setRouteStatus("No road route found to that grave.");
+          setRouteStatus(
+            routeMode === "entrance"
+              ? "No entrance walkthrough route found to that grave."
+              : "No road route found to that grave."
+          );
           setRouteSteps([]);
           return;
         }
@@ -947,7 +1019,11 @@ export default function SearchForDeceased() {
         setRouteDistance(distance || 0);
         setRoutePath(polyline);
         setRouteSteps(Array.isArray(steps) ? steps : []);
-        setRouteStatus("Route ready.");
+        setRouteStatus(
+          routeMode === "entrance"
+            ? "Entrance walkthrough route ready."
+            : "Live location route ready."
+        );
       } catch (e) {
         console.error("Route computation failed:", e);
         if (!cancelled) setRouteStatus("Route computation failed");
@@ -957,7 +1033,7 @@ export default function SearchForDeceased() {
     return () => {
       cancelled = true;
     };
-  }, [isLoggedIn, mapCoords, routingStart, graph]);
+  }, [isLoggedIn, mapCoords, routingStart, graph, routeMode]);
 
   // ------------------------- Helpers: reset UI state ------------------------
   const resetAll = useCallback(() => {
@@ -972,11 +1048,13 @@ export default function SearchForDeceased() {
     setRouteDistance(0);
     setRouteSteps([]);
     setRouteStatus("");
+    setRouteMode("entrance");
   }, []);
 
   const switchMode = useCallback(
     (m) => {
       setMode(m);
+      setRouteMode("entrance");
       resetAll();
     },
     [resetAll]
@@ -1090,11 +1168,10 @@ export default function SearchForDeceased() {
 
     if (!coords) {
       setRouteStatus("Selected record has no location (no lat or lng and plot lookup failed).");
-    } else {
-      // If no GPS, make it explicit that routing needs it
-      if (!routingStart) {
-        setRouteStatus("Grave pinned. Enable Live Location to compute a route.");
-      }
+    } else if (routeMode === "entrance") {
+      setRouteStatus("Grave pinned. Entrance walkthrough is ready.");
+    } else if (!routingStart) {
+      setRouteStatus("Grave pinned. Enable Live Location to compute a live route.");
     }
   }
 
@@ -1372,8 +1449,10 @@ export default function SearchForDeceased() {
 
     if (!coords) {
       setRouteStatus("QR scanned, but no location found (no lat or lng and plot lookup failed).");
+    } else if (routeMode === "entrance") {
+      setRouteStatus("QR scanned. Entrance walkthrough is ready.");
     } else if (!routingStart) {
-      setRouteStatus("Grave pinned. Enable Live Location to compute a route.");
+      setRouteStatus("QR scanned. Enable Live Location to compute a live route.");
     }
   }
 
@@ -1447,6 +1526,15 @@ export default function SearchForDeceased() {
         zIndex: 49,
       });
     }
+
+    list.push({
+      id: "entrance",
+      position: CEMETERY_ENTRANCE,
+      title: "Cemetery Entrance",
+      icon: svgToDataUrl(ENTRANCE_PIN_SVG),
+      label: "Entrance",
+      zIndex: 85,
+    });
 
     // Dynamic pins (route)
     if (userLocation) {
@@ -1570,6 +1658,7 @@ export default function SearchForDeceased() {
 
   const hasDetailsOpen = !!selected || !!scanResult;
   const routeReady = routePath?.length > 0 && mapCoords && routingStart && isLoggedIn;
+  const routeModeLabel = routeMode === "entrance" ? "Entrance Walkthrough" : "Live Location Walkthrough";
 
   const photoSrc = resolvePhotoSrc(
     getPhotoUrlFromAnything(selected || scanResult?.matchedRow, scanDataForSelected || scanResult?.data)
@@ -1610,7 +1699,10 @@ export default function SearchForDeceased() {
 
       const routeStartForImage = routingStart;
 
-      const mUser = `color:0x0ea5e9|label:U|${routeStartForImage.lat},${routeStartForImage.lng}`;
+      const mStart =
+        routeMode === "entrance"
+          ? `color:0x7c3aed|label:E|${routeStartForImage.lat},${routeStartForImage.lng}`
+          : `color:0x0ea5e9|label:U|${routeStartForImage.lat},${routeStartForImage.lng}`;
       const mTarget = `color:0xfb7185|label:T|${mapCoords.lat},${mapCoords.lng}`;
       const path = `weight:6|color:0x059669|enc:${enc}`;
 
@@ -1632,7 +1724,7 @@ export default function SearchForDeceased() {
         `&size=${size}` +
         `&scale=${scale}` +
         `&maptype=roadmap` +
-        `&markers=${encodeURIComponent(mUser)}` +
+        `&markers=${encodeURIComponent(mStart)}` +
         `&markers=${encodeURIComponent(mTarget)}` +
         `&path=${encodeURIComponent(path)}` +
         styleParams +
@@ -1660,7 +1752,7 @@ export default function SearchForDeceased() {
       console.error(e);
       setRouteStatus("Image download failed. Please check API key and Static Maps API.");
     }
-  }, [isLoggedIn, routeReady, routePath, mapCoords, routingStart, deceasedNameResolved, GOOGLE_KEY]);
+  }, [isLoggedIn, routeReady, routePath, mapCoords, routingStart, deceasedNameResolved, GOOGLE_KEY, routeMode]);
 
   // UX controls
   const fitCemetery = useCallback(() => {
@@ -1691,6 +1783,13 @@ export default function SearchForDeceased() {
     map.panTo(userLocation);
     map.setZoom(19);
   }, [userLocation]);
+
+  const centerToEntrance = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.panTo(CEMETERY_ENTRANCE);
+    map.setZoom(19);
+  }, []);
 
   const centerToGrave = useCallback(() => {
     const map = mapRef.current;
@@ -1756,7 +1855,7 @@ export default function SearchForDeceased() {
                   <div className="font-semibold text-amber-900">Login required</div>
                   <div className="text-sm text-amber-800 mt-0.5">
                     Please login to use <span className="font-semibold">Search</span>, <span className="font-semibold">QR Scan</span>,
-                    and <span className="font-semibold">Live Location routing</span>.
+                    <span className="font-semibold"> Burial Plot Walkthrough</span>, and <span className="font-semibold">Live Location routing</span>.
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -1800,7 +1899,9 @@ export default function SearchForDeceased() {
 
                   <CardDescription className="text-slate-600 max-w-3xl">
                     The map below always shows <span className="font-semibold">all graves and plots</span>. Search by
-                    name or scan a QR to pin a specific grave and optionally compute a route.
+                    name or scan a QR to pin a specific grave, then use either{" "}
+                    <span className="font-semibold">Open Entrance Location</span> or the{" "}
+                    <span className="font-semibold">Burial Plot Walkthrough</span> from the cemetery entrance.
                   </CardDescription>
                 </div>
 
@@ -1875,7 +1976,7 @@ export default function SearchForDeceased() {
                     <div className="rounded-2xl border bg-white/75 p-4">
                       <div className="font-semibold text-slate-900">Scan a QR Code</div>
                       <div className="text-sm text-slate-600 mt-1">
-                        Step 1: Scan or upload the QR. Step 2: Allow location. Step 3: View the grave pinned on the map.
+                        Step 1: Scan or upload the QR. Step 2: Open the entrance or start the burial plot walkthrough. Step 3: Enable Live Location only if you want a live route.
                       </div>
                       {!isLoggedIn && (
                         <div className="mt-2 text-xs text-amber-700">
@@ -2044,12 +2145,29 @@ export default function SearchForDeceased() {
                 {/* Controls */}
                 <div className="flex flex-wrap gap-2">
                   <Button
-                    variant="outline"
-                    onClick={() => requestUserLocation({ auto: false })}
-                    disabled={isRequestingLoc || !isLoggedIn}
+                    variant={routeMode === "entrance" ? "default" : "outline"}
+                    onClick={activateEntranceWalkthrough}
+                    disabled={!isLoggedIn || !mapCoords}
                     className="rounded-xl"
                   >
-                    Enable Live Location
+                    Burial Plot Walkthrough
+                  </Button>
+
+                  <Button
+                    variant={routeMode === "live" ? "default" : "outline"}
+                    onClick={activateLiveWalkthrough}
+                    disabled={isRequestingLoc || !isLoggedIn || !mapCoords}
+                    className="rounded-xl"
+                  >
+                    Enable Live Walkthrough
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    onClick={openEntranceLocation}
+                    className="rounded-xl"
+                  >
+                    Open Entrance Location
                   </Button>
 
                   <Button variant="outline" onClick={fitCemetery} className="rounded-xl">
@@ -2057,6 +2175,9 @@ export default function SearchForDeceased() {
                   </Button>
                   <Button variant="outline" onClick={fitRoute} disabled={!routeReady} className="rounded-xl">
                     Fit Route
+                  </Button>
+                  <Button variant="outline" onClick={centerToEntrance} className="rounded-xl">
+                    Center: Entrance
                   </Button>
                   <Button variant="outline" onClick={centerToYou} disabled={!userLocation} className="rounded-xl">
                     Center: You
@@ -2072,6 +2193,21 @@ export default function SearchForDeceased() {
                     Download Route Image
                   </Button>
                 </div>
+
+                {mapCoords && (
+                  <div className="rounded-xl border bg-white/80 px-3 py-2 text-sm text-slate-700">
+                    <span className="font-semibold">Walkthrough mode:</span> {routeModeLabel}
+                    {routeMode === "entrance" ? (
+                      <span className="ml-2 text-violet-700 text-xs font-medium">
+                        (Starts at the cemetery entrance)
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-emerald-700 text-xs font-medium">
+                        (Starts from your live GPS inside the cemetery)
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {!isLoggedIn && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -2104,8 +2240,9 @@ export default function SearchForDeceased() {
                     <div className="text-sm text-slate-600 mt-1">
                       The map already shows <span className="font-semibold">all graves</span> plus{" "}
                       <span className="font-semibold">comfort rooms</span> and{" "}
-                      <span className="font-semibold">parking</span>. Use Search or QR to pin a grave, then enable Live
-                      Location to generate directions.
+                      <span className="font-semibold">parking</span>. Use Search or QR to pin a grave, then choose{" "}
+                      <span className="font-semibold">Open Entrance Location</span> or{" "}
+                      <span className="font-semibold">Burial Plot Walkthrough</span>. Live Location remains optional.
                     </div>
                   </div>
                 )}
@@ -2114,13 +2251,27 @@ export default function SearchForDeceased() {
                   <div className="rounded-2xl border bg-white/90 p-4 shadow-sm">
                     <div className="font-semibold text-slate-800">How to get there</div>
                     <div className="text-sm text-slate-600 mt-1">
-                      Your location uses the <span className="font-semibold">blue pin</span> and the grave uses the{" "}
-                      <span className="font-semibold">pink target pin</span>.
-                      {locationSource === "gps" ? (
-                        <span className="ml-2 text-emerald-700 text-xs font-medium">(Live GPS enabled)</span>
+                      The <span className="font-semibold">purple pin</span> is the cemetery entrance, the{" "}
+                      <span className="font-semibold">pink target pin</span> is the grave, and the{" "}
+                      <span className="font-semibold">blue pin</span> is your live location when GPS is enabled.
+                      {routeMode === "entrance" ? (
+                        <span className="ml-2 text-violet-700 text-xs font-medium">
+                          (Using entrance walkthrough)
+                        </span>
+                      ) : locationSource === "gps" ? (
+                        <span className="ml-2 text-emerald-700 text-xs font-medium">
+                          (Using live location walkthrough)
+                        </span>
                       ) : (
-                        <span className="ml-2 text-slate-500 text-xs font-medium">(Live GPS not enabled)</span>
+                        <span className="ml-2 text-slate-500 text-xs font-medium">
+                          (Live GPS not enabled)
+                        </span>
                       )}
+                    </div>
+
+                    <div className="mt-2 text-xs text-slate-500">
+                      Use <span className="font-semibold">Open Entrance Location</span> for the outside trip to the gate,
+                      then use <span className="font-semibold">Burial Plot Walkthrough</span> for the path inside the cemetery.
                     </div>
 
                     {routeSteps?.length ? (
@@ -2328,10 +2479,10 @@ export default function SearchForDeceased() {
       >
         <DialogContent className="sm:max-w-md rounded-2xl" onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
-            <DialogTitle>Use Your Location?</DialogTitle>
+            <DialogTitle>Use Your Live Location?</DialogTitle>
             <DialogDescription>
-              If you allow location access, we will try to start the route from where you are. If you are far from the cemetery,
-              routing will not be computed until you are near the cemetery.
+              Live walkthrough starts from where you are. If you are far from the cemetery, the internal route will not be computed
+              until you are near the cemetery. You can still use the entrance walkthrough without GPS.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
@@ -2342,13 +2493,13 @@ export default function SearchForDeceased() {
                 locationActionRef.current = null;
                 setLocationModalOpen(false);
                 setLocationConsent(true);
-                setRouteStatus("Location not enabled. Enable Live Location to compute a route.");
+                setRouteStatus("Location not enabled. You can still use the entrance walkthrough.");
               }}
             >
               Not Now
             </Button>
             <Button className="rounded-xl" onClick={() => requestUserLocation({ auto: false })} disabled={!isLoggedIn}>
-              Allow Location Access
+              Allow Live Location
             </Button>
           </DialogFooter>
         </DialogContent>

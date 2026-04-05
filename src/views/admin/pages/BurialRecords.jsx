@@ -1,31 +1,80 @@
 // frontend/src/views/admin/pages/BurialRecords.jsx
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAuth } from "../../../utils/auth";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
+import QRCode from "react-qr-code";
 
-import { RefreshCcw, Search, Loader2, XCircle, MapPin, Info, RotateCcw } from "lucide-react";
+import {
+  RefreshCcw,
+  Search,
+  Loader2,
+  XCircle,
+  MapPin,
+  Info,
+  RotateCcw,
+  QrCode,
+  Pencil,
+  Trash2,
+  Download,
+  Copy,
+  Save,
+} from "lucide-react";
 
 // shadcn/ui
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
+import { Textarea } from "../../../components/ui/textarea";
 import { Badge } from "../../../components/ui/badge";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../../../components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../../../components/ui/dialog";
-import { Alert, AlertTitle, AlertDescription } from "../../../components/ui/alert";
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../../../components/ui/select";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "../../../components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../../../components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "../../../components/ui/dialog";
+import {
+  Alert,
+  AlertTitle,
+  AlertDescription,
+} from "../../../components/ui/alert";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "../../../components/ui/select";
 
 const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "/api";
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) ||
+  "/api";
 
 /* ---------------- small debounce hook ---------------- */
 function useDebouncedValue(value, delay = 250) {
   const [debounced, setDebounced] = useState(value);
+
   useEffect(() => {
     const t = setTimeout(() => setDebounced(value), delay);
     return () => clearTimeout(t);
   }, [value, delay]);
+
   return debounced;
 }
 
@@ -39,6 +88,24 @@ function formatDate(v) {
     month: "short",
     day: "2-digit",
   });
+}
+
+function toDateInputValue(v) {
+  if (!v) return "";
+  const s = String(v).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function formatPrice(v) {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  if (Number.isNaN(n)) return String(v);
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 function extractList(body) {
@@ -67,21 +134,30 @@ function isTruthyStr(v) {
 
 function statusBadgeProps(statusRaw) {
   const s = safeLower(statusRaw);
-  if (s === "available") return { label: "Available", className: "bg-emerald-600 hover:bg-emerald-600" };
-  if (s === "reserved") return { label: "Reserved", className: "bg-amber-500 hover:bg-amber-500" };
-  if (s === "occupied") return { label: "Occupied", className: "bg-rose-600 hover:bg-rose-600" };
-  return { label: statusRaw || "—", className: "bg-slate-500 hover:bg-slate-500" };
+  if (s === "available") {
+    return {
+      label: "Available",
+      className: "bg-emerald-600 hover:bg-emerald-600",
+    };
+  }
+  if (s === "reserved") {
+    return {
+      label: "Reserved",
+      className: "bg-amber-500 hover:bg-amber-500",
+    };
+  }
+  if (s === "occupied") {
+    return {
+      label: "Occupied",
+      className: "bg-rose-600 hover:bg-rose-600",
+    };
+  }
+  return {
+    label: statusRaw || "—",
+    className: "bg-slate-500 hover:bg-slate-500",
+  };
 }
 
-/**
- * ✅ Normalize plot rows so the UI won't be empty due to mismatched field names.
- * Supports:
- * - status vs plot_status vs plotStatus
- * - person_full_name vs personFullName vs deceased_name
- * - date_of_birth vs birth_date, etc.
- * - id vs plot_id vs plotId
- * - uid vs plot_uid vs plotUid
- */
 function normalizePlotRow(r) {
   const status = r?.status ?? r?.plot_status ?? r?.plotStatus ?? null;
 
@@ -102,9 +178,22 @@ function normalizePlotRow(r) {
   const uid = r?.uid ?? r?.plot_uid ?? r?.plotUid ?? null;
 
   const plot_name =
-    r?.plot_name ?? r?.plotName ?? r?.plot_code ?? r?.plotCode ?? r?.name ?? null;
+    r?.plot_name ??
+    r?.plotName ??
+    r?.plot_code ??
+    r?.plotCode ??
+    r?.name ??
+    null;
 
   const plot_code = r?.plot_code ?? r?.plotCode ?? null;
+
+  const qr_token =
+    r?.qr_token ??
+    r?.qrToken ??
+    r?.qr ??
+    r?.qr_value ??
+    r?.qrValue ??
+    null;
 
   return {
     ...r,
@@ -116,11 +205,11 @@ function normalizePlotRow(r) {
     date_of_death,
     plot_name,
     plot_code,
+    qr_token,
   };
 }
 
 function extractPlotRows(body) {
-  // GeoJSON FeatureCollection
   if (body?.type === "FeatureCollection" && Array.isArray(body?.features)) {
     return body.features.map((f) =>
       normalizePlotRow({
@@ -130,14 +219,70 @@ function extractPlotRows(body) {
     );
   }
 
-  // plain array
   if (Array.isArray(body)) return body.map(normalizePlotRow);
 
-  // wrapped array
   const arr = extractList(body);
   if (Array.isArray(arr) && arr.length) return arr.map(normalizePlotRow);
 
   return [];
+}
+
+function buildFallbackQr(details) {
+  if (!details) return "";
+
+  const payload = {
+    _type: "grave",
+    id: details?.id ?? null,
+    uid: details?.uid ?? null,
+    plot_name: details?.plot_name ?? null,
+    plot_type: details?.plot_type ?? null,
+    status: details?.status ?? null,
+    price: details?.price ?? null,
+    person_full_name: details?.person_full_name ?? null,
+    date_of_birth: details?.date_of_birth ?? details?.birth_date ?? null,
+    date_of_death: details?.date_of_death ?? details?.death_date ?? null,
+    next_of_kin_name: details?.next_of_kin_name ?? null,
+    contact_phone: details?.contact_phone ?? null,
+    contact_email: details?.contact_email ?? null,
+    notes: details?.notes ?? null,
+    lat: details?.lat ?? null,
+    lng: details?.lng ?? null,
+  };
+
+  return JSON.stringify(payload);
+}
+
+function resolveQrText(details) {
+  const direct =
+    details?.qr_token ??
+    details?.qrToken ??
+    details?.qr ??
+    details?.qr_value ??
+    details?.qrValue ??
+    "";
+
+  if (String(direct || "").trim()) return String(direct).trim();
+  return buildFallbackQr(details);
+}
+
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function safeFileName(s) {
+  return String(s || "plot")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
 }
 
 export default function BurialRecords() {
@@ -151,36 +296,41 @@ export default function BurialRecords() {
 
   const ENDPOINTS = useMemo(
     () => ({
-      listPlots: `${API_BASE}/plot/`,
-      plotDetails: (idOrUid) => `${API_BASE}/admin/plot/${encodeURIComponent(idOrUid)}`,
+      listPlots: `${API_BASE}/admin/plots`,
+      plotDetails: (idOrUid) =>
+        `${API_BASE}/admin/plot/${encodeURIComponent(idOrUid)}`,
+      editPlot: `${API_BASE}/admin/edit-plot`,
+      deletePlot: (idOrUid) =>
+        `${API_BASE}/admin/delete-plot/${encodeURIComponent(idOrUid)}`,
     }),
     []
   );
 
-  // data state
+  const qrWrapRef = useRef(null);
+
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // search
   const [qInput, setQInput] = useState("");
   const q = useDebouncedValue(qInput, 180);
 
-  // ✅ defaults changed so it shows something immediately
-  const [deceasedOnly, setDeceasedOnly] = useState(false); // default: show all plots
-  const [statusFilter, setStatusFilter] = useState("all"); // default: all statuses
+  const [deceasedOnly, setDeceasedOnly] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all");
 
-  // pagination
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
-  // details modal
   const [open, setOpen] = useState(false);
   const [detailsBusy, setDetailsBusy] = useState(false);
   const [detailsErr, setDetailsErr] = useState("");
   const [details, setDetails] = useState(null);
 
-  /* ---------------- API helpers ---------------- */
+  const [editMode, setEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [editDraft, setEditDraft] = useState(null);
+
   const fetchAny = useCallback(
     async (url, opts = {}) => {
       const res = await fetch(url, {
@@ -216,8 +366,6 @@ export default function BurialRecords() {
     try {
       const body = await fetchAny(ENDPOINTS.listPlots);
       const list = extractPlotRows(body);
-
-      // ✅ always keep data consistent
       setRows(Array.isArray(list) ? list : []);
     } catch (e) {
       setRows([]);
@@ -231,7 +379,6 @@ export default function BurialRecords() {
     load();
   }, [load]);
 
-  /* ---------------- filters ---------------- */
   const filtered = useMemo(() => {
     const text = q.trim().toLowerCase();
 
@@ -261,6 +408,7 @@ export default function BurialRecords() {
           r?.contact_phone,
           r?.contact_email,
           r?.notes,
+          r?.qr_token,
         ]
           .filter((v) => v != null)
           .map((v) => String(v).toLowerCase())
@@ -270,7 +418,6 @@ export default function BurialRecords() {
       });
   }, [rows, q, deceasedOnly, statusFilter]);
 
-  // reset to page 1 when filters/search changes
   useEffect(() => {
     setPage(1);
   }, [q, pageSize, deceasedOnly, statusFilter]);
@@ -302,20 +449,40 @@ export default function BurialRecords() {
     return { from, to, total };
   }, [filtered.length, page, pageSize]);
 
-  /* ---------------- actions ---------------- */
   const openDetails = useCallback(
     async (row) => {
       const idOrUid = row?.id ?? row?.uid;
       if (!idOrUid) return;
 
       setOpen(true);
+      setEditMode(false);
       setDetails(null);
+      setEditDraft(null);
       setDetailsErr("");
       setDetailsBusy(true);
 
       try {
         const body = await fetchAny(ENDPOINTS.plotDetails(idOrUid));
-        setDetails(body);
+        const normalized = normalizePlotRow(body);
+        setDetails(normalized);
+        setEditDraft({
+          id: normalized?.id ?? "",
+          uid: normalized?.uid ?? "",
+          plot_name: normalized?.plot_name ?? "",
+          status: normalized?.status ?? "",
+          price:
+            normalized?.price === null || normalized?.price === undefined
+              ? ""
+              : String(normalized.price),
+          person_full_name: normalized?.person_full_name ?? "",
+          date_of_birth: toDateInputValue(normalized?.date_of_birth),
+          date_of_death: toDateInputValue(normalized?.date_of_death),
+          next_of_kin_name: normalized?.next_of_kin_name ?? "",
+          contact_phone: normalized?.contact_phone ?? "",
+          contact_email: normalized?.contact_email ?? "",
+          notes: normalized?.notes ?? "",
+          qr_token: normalized?.qr_token ?? "",
+        });
       } catch (e) {
         setDetailsErr(String(e?.message || e));
       } finally {
@@ -333,6 +500,167 @@ export default function BurialRecords() {
     setPage(1);
   };
 
+  const qrText = useMemo(() => resolveQrText(editMode ? editDraft : details), [
+    details,
+    editDraft,
+    editMode,
+  ]);
+
+  const qrBaseName = useMemo(() => {
+    const src = editMode ? editDraft : details;
+    return safeFileName(src?.plot_name || src?.uid || src?.id || "qr_code");
+  }, [details, editDraft, editMode]);
+
+  const handleDraftChange = (field, value) => {
+    setEditDraft((prev) => ({ ...(prev || {}), [field]: value }));
+  };
+
+  const handleSave = async () => {
+    if (!editDraft?.id) return;
+
+    setSaving(true);
+    try {
+      const payload = {
+        id: editDraft.id,
+        plot_name: String(editDraft.plot_name || "").trim() || null,
+        status: String(editDraft.status || "").trim() || null,
+        price:
+          String(editDraft.price || "").trim() === ""
+            ? null
+            : Number(editDraft.price),
+        person_full_name: String(editDraft.person_full_name || "").trim() || null,
+        date_of_birth: String(editDraft.date_of_birth || "").trim() || null,
+        date_of_death: String(editDraft.date_of_death || "").trim() || null,
+        next_of_kin_name: String(editDraft.next_of_kin_name || "").trim() || null,
+        contact_phone: String(editDraft.contact_phone || "").trim() || null,
+        contact_email: String(editDraft.contact_email || "").trim() || null,
+        notes: String(editDraft.notes || ""),
+        qr_token: String(editDraft.qr_token || "").trim() || null,
+      };
+
+      const body = await fetchAny(ENDPOINTS.editPlot, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const updated = normalizePlotRow(body);
+      setDetails((prev) => normalizePlotRow({ ...(prev || {}), ...(updated || payload) }));
+      setEditDraft((prev) => ({ ...(prev || {}), ...(updated || payload) }));
+      setEditMode(false);
+      toast.success("Burial record updated.");
+      await load();
+    } catch (e) {
+      toast.error(String(e?.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    const idOrUid = details?.id ?? details?.uid;
+    if (!idOrUid) return;
+
+    const ok = window.confirm(
+      "Are you sure you want to delete this plot record?\\n\\nThis uses the plot delete endpoint and may fail if the plot is referenced by graves or other records."
+    );
+    if (!ok) return;
+
+    setDeleting(true);
+    try {
+      await fetchAny(ENDPOINTS.deletePlot(idOrUid), { method: "DELETE" });
+      toast.success("Plot record deleted.");
+      setOpen(false);
+      setDetails(null);
+      setEditDraft(null);
+      setEditMode(false);
+      await load();
+    } catch (e) {
+      toast.error(String(e?.message || e));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleCopyQr = async () => {
+    try {
+      await navigator.clipboard.writeText(qrText);
+      toast.success("QR payload copied.");
+    } catch {
+      toast.error("Failed to copy QR payload.");
+    }
+  };
+
+  const handleDownloadQrSvg = () => {
+    try {
+      const svg = qrWrapRef.current?.querySelector("svg");
+      if (!svg) {
+        toast.error("QR code not ready.");
+        return;
+      }
+      const xml = new XMLSerializer().serializeToString(svg);
+      const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
+      downloadBlob(`${qrBaseName}.svg`, blob);
+      toast.success("QR code downloaded as SVG.");
+    } catch (e) {
+      toast.error(String(e?.message || e || "Failed to download SVG."));
+    }
+  };
+
+  const handleDownloadQrPng = async () => {
+    try {
+      const svg = qrWrapRef.current?.querySelector("svg");
+      if (!svg) {
+        toast.error("QR code not ready.");
+        return;
+      }
+
+      const xml = new XMLSerializer().serializeToString(svg);
+      const svgBlob = new Blob([xml], {
+        type: "image/svg+xml;charset=utf-8",
+      });
+      const svgUrl = URL.createObjectURL(svgBlob);
+
+      const img = new Image();
+      img.decoding = "async";
+
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = svgUrl;
+      });
+
+      const size = 1024;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        URL.revokeObjectURL(svgUrl);
+        throw new Error("Canvas not available.");
+      }
+
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, size, size);
+      ctx.drawImage(img, 0, 0, size, size);
+
+      const blob = await new Promise((resolve) =>
+        canvas.toBlob(resolve, "image/png")
+      );
+
+      URL.revokeObjectURL(svgUrl);
+
+      if (!blob) throw new Error("Failed to create PNG.");
+      downloadBlob(`${qrBaseName}.png`, blob);
+      toast.success("QR code downloaded as PNG.");
+    } catch (e) {
+      toast.error(String(e?.message || e || "Failed to download PNG."));
+    }
+  };
+
+  const detailsView = editMode ? editDraft : details;
+
   return (
     <div className="p-6 space-y-6">
       <Toaster richColors expand={false} />
@@ -341,7 +669,7 @@ export default function BurialRecords() {
         <div>
           <h1 className="text-2xl font-bold">Burial Records (from Plots)</h1>
           <p className="text-sm text-muted-foreground">
-            This list is taken from plots person_full_name (deceased), but you can also view all plots.
+            This list is loaded from plots and shows deceased data, dates, and QR details.
           </p>
         </div>
 
@@ -352,7 +680,9 @@ export default function BurialRecords() {
           </Button>
 
           <Button variant="outline" onClick={load} disabled={loading} title="Refresh">
-            <RefreshCcw className={["mr-2 h-4 w-4", loading ? "animate-spin" : ""].join(" ")} />
+            <RefreshCcw
+              className={["mr-2 h-4 w-4", loading ? "animate-spin" : ""].join(" ")}
+            />
             Refresh
           </Button>
         </div>
@@ -445,7 +775,6 @@ export default function BurialRecords() {
             </div>
           </div>
 
-          {/* Pagination controls */}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs text-slate-500">
               Page <span className="font-medium">{page}</span> of{" "}
@@ -489,7 +818,7 @@ export default function BurialRecords() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Plots list</CardTitle>
           <CardDescription className="text-sm text-slate-600">
-            Tip: If you want only deceased records, switch “Show” → “Deceased only”.
+            Tip: Switch Show → Deceased only to focus on filled burial records.
           </CardDescription>
         </CardHeader>
 
@@ -525,7 +854,7 @@ export default function BurialRecords() {
                     <TableHead>Plot ID</TableHead>
                     <TableHead>Plot</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Deceased (person_full_name)</TableHead>
+                    <TableHead>Deceased</TableHead>
                     <TableHead>DOB</TableHead>
                     <TableHead>DOD</TableHead>
                     <TableHead className="text-right">Action</TableHead>
@@ -568,8 +897,12 @@ export default function BurialRecords() {
                           </div>
                         </TableCell>
 
-                        <TableCell className="text-sm">{formatDate(r?.date_of_birth)}</TableCell>
-                        <TableCell className="text-sm">{formatDate(r?.date_of_death)}</TableCell>
+                        <TableCell className="text-sm">
+                          {formatDate(r?.date_of_birth)}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {formatDate(r?.date_of_death)}
+                        </TableCell>
 
                         <TableCell className="text-right">
                           <Button size="sm" variant="outline" onClick={() => openDetails(r)}>
@@ -587,7 +920,6 @@ export default function BurialRecords() {
         </CardContent>
       </Card>
 
-      {/* Details Modal */}
       <Dialog
         open={open}
         onOpenChange={(o) => {
@@ -596,13 +928,19 @@ export default function BurialRecords() {
             setDetails(null);
             setDetailsErr("");
             setDetailsBusy(false);
+            setEditMode(false);
+            setEditDraft(null);
+            setSaving(false);
+            setDeleting(false);
           }
         }}
       >
-        <DialogContent className="sm:max-w-[860px] max-h-[85vh] overflow-auto">
+        <DialogContent className="sm:max-w-[980px] max-h-[90vh] overflow-auto">
           <DialogHeader>
-            <DialogTitle>Plot Details</DialogTitle>
-            <DialogDescription>Information loaded from /api/admin/plot/:id</DialogDescription>
+            <DialogTitle>{editMode ? "Edit Burial Record Details" : "Plot Details"}</DialogTitle>
+            <DialogDescription>
+              Loaded from the admin plot endpoints.
+            </DialogDescription>
           </DialogHeader>
 
           {detailsErr ? (
@@ -620,33 +958,279 @@ export default function BurialRecords() {
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading details…
             </div>
-          ) : details ? (
-            <div className="text-sm space-y-2">
-              <div className="rounded-md border p-3 bg-white">
-                <div className="text-xs text-slate-500">Person Full Name</div>
-                <div className="font-medium">
-                  {details.person_full_name ?? details.personFullName ?? details.deceased_name ?? "—"}
-                </div>
+          ) : detailsView ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2 justify-end">
+                {!editMode ? (
+                  <Button type="button" variant="outline" onClick={() => setEditMode(true)}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </Button>
+                ) : (
+                  <Button type="button" variant="outline" onClick={() => {
+                    setEditMode(false);
+                    setEditDraft({
+                      id: details?.id ?? "",
+                      uid: details?.uid ?? "",
+                      plot_name: details?.plot_name ?? "",
+                      status: details?.status ?? "",
+                      price:
+                        details?.price === null || details?.price === undefined
+                          ? ""
+                          : String(details.price),
+                      person_full_name: details?.person_full_name ?? "",
+                      date_of_birth: toDateInputValue(details?.date_of_birth),
+                      date_of_death: toDateInputValue(details?.date_of_death),
+                      next_of_kin_name: details?.next_of_kin_name ?? "",
+                      contact_phone: details?.contact_phone ?? "",
+                      contact_email: details?.contact_email ?? "",
+                      notes: details?.notes ?? "",
+                      qr_token: details?.qr_token ?? "",
+                    });
+                  }}>
+                    Cancel edit
+                  </Button>
+                )}
+
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={handleDelete}
+                  disabled={deleting || saving}
+                >
+                  {deleting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-2 h-4 w-4" />
+                  )}
+                  Delete
+                </Button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="rounded-md border p-3 bg-white">
-                  <div className="text-xs text-slate-500">Date of Birth</div>
-                  <div className="font-medium">
-                    {formatDate(details.date_of_birth ?? details.birth_date ?? details.birthDate)}
-                  </div>
+                  <Label className="text-xs text-slate-500">Plot Name</Label>
+                  {editMode ? (
+                    <Input
+                      className="mt-2"
+                      value={editDraft?.plot_name ?? ""}
+                      onChange={(e) => handleDraftChange("plot_name", e.target.value)}
+                    />
+                  ) : (
+                    <div className="font-medium mt-1">{detailsView?.plot_name ?? "—"}</div>
+                  )}
                 </div>
+
                 <div className="rounded-md border p-3 bg-white">
-                  <div className="text-xs text-slate-500">Date of Death</div>
-                  <div className="font-medium">
-                    {formatDate(details.date_of_death ?? details.death_date ?? details.deathDate)}
-                  </div>
+                  <Label className="text-xs text-slate-500">Status</Label>
+                  {editMode ? (
+                    <Select
+                      value={String(editDraft?.status || "available")}
+                      onValueChange={(v) => handleDraftChange("status", v)}
+                    >
+                      <SelectTrigger className="mt-2">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="available">Available</SelectItem>
+                        <SelectItem value="reserved">Reserved</SelectItem>
+                        <SelectItem value="occupied">Occupied</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="mt-2">
+                      {(() => {
+                        const s = statusBadgeProps(detailsView?.status);
+                        return <Badge className={s.className}>{s.label}</Badge>;
+                      })()}
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="rounded-md border p-3 bg-white">
-                <div className="text-xs text-slate-500">Notes</div>
-                <div className="whitespace-pre-wrap">{details.notes ?? "—"}</div>
+                <Label className="text-xs text-slate-500">Deceased Name</Label>
+                {editMode ? (
+                  <Input
+                    className="mt-2"
+                    value={editDraft?.person_full_name ?? ""}
+                    onChange={(e) =>
+                      handleDraftChange("person_full_name", e.target.value)
+                    }
+                  />
+                ) : (
+                  <div className="font-medium mt-1">
+                    {detailsView?.person_full_name ?? "—"}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-md border p-3 bg-white">
+                  <Label className="text-xs text-slate-500">Date of Birth</Label>
+                  {editMode ? (
+                    <Input
+                      className="mt-2"
+                      type="date"
+                      value={editDraft?.date_of_birth ?? ""}
+                      onChange={(e) => handleDraftChange("date_of_birth", e.target.value)}
+                    />
+                  ) : (
+                    <div className="font-medium mt-1">
+                      {formatDate(detailsView?.date_of_birth)}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-md border p-3 bg-white">
+                  <Label className="text-xs text-slate-500">Date of Death</Label>
+                  {editMode ? (
+                    <Input
+                      className="mt-2"
+                      type="date"
+                      value={editDraft?.date_of_death ?? ""}
+                      onChange={(e) => handleDraftChange("date_of_death", e.target.value)}
+                    />
+                  ) : (
+                    <div className="font-medium mt-1">
+                      {formatDate(detailsView?.date_of_death)}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-md border p-3 bg-white">
+                  <Label className="text-xs text-slate-500">Price</Label>
+                  {editMode ? (
+                    <Input
+                      className="mt-2"
+                      inputMode="decimal"
+                      value={editDraft?.price ?? ""}
+                      onChange={(e) => handleDraftChange("price", e.target.value)}
+                    />
+                  ) : (
+                    <div className="font-medium mt-1">
+                      {formatPrice(detailsView?.price)}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-md border p-3 bg-white">
+                  <Label className="text-xs text-slate-500">Next of Kin</Label>
+                  {editMode ? (
+                    <Input
+                      className="mt-2"
+                      value={editDraft?.next_of_kin_name ?? ""}
+                      onChange={(e) =>
+                        handleDraftChange("next_of_kin_name", e.target.value)
+                      }
+                    />
+                  ) : (
+                    <div className="font-medium mt-1">
+                      {detailsView?.next_of_kin_name ?? "—"}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-md border p-3 bg-white">
+                  <Label className="text-xs text-slate-500">Contact Phone</Label>
+                  {editMode ? (
+                    <Input
+                      className="mt-2"
+                      value={editDraft?.contact_phone ?? ""}
+                      onChange={(e) =>
+                        handleDraftChange("contact_phone", e.target.value)
+                      }
+                    />
+                  ) : (
+                    <div className="font-medium mt-1">
+                      {detailsView?.contact_phone ?? "—"}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-md border p-3 bg-white">
+                  <Label className="text-xs text-slate-500">Contact Email</Label>
+                  {editMode ? (
+                    <Input
+                      className="mt-2"
+                      value={editDraft?.contact_email ?? ""}
+                      onChange={(e) =>
+                        handleDraftChange("contact_email", e.target.value)
+                      }
+                    />
+                  ) : (
+                    <div className="font-medium mt-1">
+                      {detailsView?.contact_email ?? "—"}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-md border p-3 bg-white">
+                <Label className="text-xs text-slate-500">Notes</Label>
+                {editMode ? (
+                  <Textarea
+                    className="mt-2 min-h-[100px]"
+                    value={editDraft?.notes ?? ""}
+                    onChange={(e) => handleDraftChange("notes", e.target.value)}
+                  />
+                ) : (
+                  <div className="whitespace-pre-wrap mt-1">
+                    {detailsView?.notes ?? "—"}
+                  </div>
+                )}
+              </div>
+
+           
+
+              <div className="rounded-md border p-4 bg-white">
+                <div className="flex items-center gap-2 mb-3">
+                  <QrCode className="h-4 w-4 text-slate-600" />
+                  <div className="text-sm font-semibold text-slate-900">QR Code</div>
+                </div>
+
+                {isTruthyStr(qrText) ? (
+                  <div className="grid grid-cols-1 md:grid-cols-[220px,1fr] gap-4 items-start">
+                    <div
+                      ref={qrWrapRef}
+                      className="rounded-lg border bg-white p-4 flex items-center justify-center"
+                    >
+                      <QRCode
+                        value={qrText}
+                        size={180}
+                        bgColor="#FFFFFF"
+                        fgColor="#111827"
+                        level="M"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-xs text-slate-500">QR Actions</div>
+
+                      <div className="flex flex-wrap gap-2">
+                    
+
+                     
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDownloadQrPng}
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Download PNG
+                        </Button>
+                      </div>
+
+                     
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-500">No QR code available.</div>
+                )}
               </div>
             </div>
           ) : (
@@ -654,13 +1238,27 @@ export default function BurialRecords() {
           )}
 
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" type="button" onClick={() => setOpen(false)} disabled={detailsBusy}>
-              Close
-            </Button>
-            <Button type="button" onClick={load} disabled={loading}>
-              <RefreshCcw className="mr-2 h-4 w-4" />
-              Refresh list
-            </Button>
+        
+
+            {editMode ? (
+              <Button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || deleting}
+              >
+                {saving ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Save changes
+              </Button>
+            ) : (
+              <Button type="button" onClick={load} disabled={loading}>
+                <RefreshCcw className="mr-2 h-4 w-4" />
+                Refresh list
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

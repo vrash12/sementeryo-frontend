@@ -1,4 +1,3 @@
-// frontend/src/views/visitor/pages/Reservation.jsx
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
@@ -46,26 +45,62 @@ import { Toaster, toast } from "sonner";
 
 const API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "";
-const IMG_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL_IMAGE) ||
-  API_BASE;
 
-const DRAFT_KEY = "reservationDraft_v3"; // bumped because we changed draft shape
+const DRAFT_KEY = "reservationDraft_v4";
 
 /* --------------------------- auth helpers --------------------------- */
+function normalizeAuthPayload(payload) {
+  if (!payload || typeof payload !== "object") return null;
+
+  const user =
+    payload.user ??
+    payload.data?.user ??
+    payload.profile ??
+    payload.auth?.user ??
+    null;
+
+  const accessToken =
+    payload.accessToken ??
+    payload.data?.accessToken ??
+    payload.auth?.accessToken ??
+    "";
+
+  const token =
+    payload.token ??
+    payload.data?.token ??
+    payload.auth?.token ??
+    "";
+
+  const jwt =
+    payload.jwt ??
+    payload.data?.jwt ??
+    payload.auth?.jwt ??
+    "";
+
+  return {
+    ...payload,
+    user,
+    accessToken,
+    token,
+    jwt,
+  };
+}
+
 function readAuth() {
   if (typeof window === "undefined") return null;
   const raw = localStorage.getItem("auth");
   if (!raw) return null;
   try {
-    return JSON.parse(raw);
+    return normalizeAuthPayload(JSON.parse(raw));
   } catch {
     return null;
   }
 }
+
 function getToken(auth) {
   return auth?.accessToken || auth?.token || auth?.jwt || "";
 }
+
 function isFutureYMD(ymd, todayYMD) {
   const v = String(ymd || "").trim();
   if (!v) return false;
@@ -80,15 +115,6 @@ function isBeforeYMD(a, b) {
 }
 
 /* --------------------------- helpers --------------------------- */
-const resolveAssetUrl = (p) => {
-  if (!p) return null;
-  try {
-    return new URL(p, IMG_BASE.replace(/\/+$/, "") + "/").toString();
-  } catch {
-    return p;
-  }
-};
-
 const buildInquireLink = ({ plotId, reservationId, deceasedName }) => {
   const sp = new URLSearchParams();
   if (plotId != null) sp.set("plot_id", String(plotId));
@@ -103,7 +129,6 @@ const ENDPOINTS = {
   myReservations: `${API_BASE}/visitor/my-reservations`,
   cancelReservation: (id) =>
     `${API_BASE}/visitor/cancel-reservation/${encodeURIComponent(id)}`,
-
 };
 
 function formatPrice(v) {
@@ -114,7 +139,6 @@ function formatPrice(v) {
 }
 
 function todayISODateLocal() {
-  // Returns YYYY-MM-DD in the user's local timezone (safe for <input type="date" />)
   const d = new Date();
   const tzOffsetMs = d.getTimezoneOffset() * 60000;
   return new Date(d.getTime() - tzOffsetMs).toISOString().slice(0, 10);
@@ -122,26 +146,27 @@ function todayISODateLocal() {
 
 function statusBadgeProps(statusRaw) {
   const s = String(statusRaw || "").toLowerCase();
-  if (s === "available")
-    return {
-      label: "Available",
-      className: "bg-emerald-600 hover:bg-emerald-600",
-    };
-  if (s === "reserved")
+  if (s === "available") {
+    return { label: "Available", className: "bg-emerald-600 hover:bg-emerald-600" };
+  }
+  if (s === "reserved") {
     return { label: "Reserved", className: "bg-amber-500 hover:bg-amber-500" };
-  if (s === "occupied")
+  }
+  if (s === "occupied") {
     return { label: "Occupied", className: "bg-rose-600 hover:bg-rose-600" };
-  if (s === "pending")
+  }
+  if (s === "pending") {
     return { label: "Pending", className: "bg-amber-500 hover:bg-amber-500" };
-  if (s === "approved")
-    return {
-      label: "Approved",
-      className: "bg-emerald-600 hover:bg-emerald-600",
-    };
-  if (s === "rejected")
+  }
+  if (s === "approved") {
+    return { label: "Approved", className: "bg-emerald-600 hover:bg-emerald-600" };
+  }
+  if (s === "rejected") {
     return { label: "Rejected", className: "bg-rose-600 hover:bg-rose-600" };
-  if (s === "cancelled" || s === "canceled")
+  }
+  if (s === "cancelled" || s === "canceled") {
     return { label: "Cancelled", className: "bg-slate-500 hover:bg-slate-500" };
+  }
   return {
     label: statusRaw || "—",
     className: "bg-slate-500 hover:bg-slate-500",
@@ -163,15 +188,17 @@ function centroidOfFeature(feature) {
     if (geom.type === "Polygon") {
       const outer = geom.coordinates?.[0] || [];
       for (const [lng, lat] of outer) {
-        if (typeof lat === "number" && typeof lng === "number")
+        if (typeof lat === "number" && typeof lng === "number") {
           coords.push({ lat, lng });
+        }
       }
     } else if (geom.type === "MultiPolygon") {
       for (const poly of geom.coordinates || []) {
         const outer = poly?.[0] || [];
         for (const [lng, lat] of outer) {
-          if (typeof lat === "number" && typeof lng === "number")
+          if (typeof lat === "number" && typeof lng === "number") {
             coords.push({ lat, lng });
+          }
         }
       }
     } else {
@@ -228,16 +255,14 @@ function Stepper({ step }) {
     { n: 1, label: "Enter details", icon: Info, hint: "Visitor & deceased info" },
     { n: 2, label: "Pick on map", icon: MapPin, hint: "Select an available plot" },
     { n: 3, label: "Confirm & submit", icon: ClipboardList, hint: "Review then submit" },
- { n: 4, label: "Wait approval", icon: CheckCircle2, hint: "Admin reviews your request" },
+    { n: 4, label: "Wait approval", icon: CheckCircle2, hint: "Admin reviews your request" },
   ];
 
   const pct =
     steps.length <= 1
       ? 100
       : Math.round(
-          ((Math.max(1, Math.min(step, steps.length)) - 1) /
-            (steps.length - 1)) *
-            100
+          ((Math.max(1, Math.min(step, steps.length)) - 1) / (steps.length - 1)) * 100
         );
 
   return (
@@ -271,8 +296,8 @@ function Stepper({ step }) {
                 done
                   ? "border-emerald-200 shadow-sm"
                   : active
-                  ? "border-blue-200 shadow-sm ring-1 ring-blue-200/60"
-                  : "border-slate-200 hover:border-slate-300 hover:shadow-sm",
+                    ? "border-blue-200 shadow-sm ring-1 ring-blue-200/60"
+                    : "border-slate-200 hover:border-slate-300 hover:shadow-sm",
               ].join(" ")}
             >
               <div className="flex items-center gap-3">
@@ -282,8 +307,8 @@ function Stepper({ step }) {
                     done
                       ? "bg-emerald-100 border-emerald-200 text-emerald-700"
                       : active
-                      ? "bg-blue-100 border-blue-200 text-blue-700"
-                      : "bg-slate-50 border-slate-200 text-slate-700 group-hover:bg-slate-100",
+                        ? "bg-blue-100 border-blue-200 text-blue-700"
+                        : "bg-slate-50 border-slate-200 text-slate-700 group-hover:bg-slate-100",
                   ].join(" ")}
                 >
                   {done ? "✓" : <Icon className="h-4 w-4" />}
@@ -291,9 +316,7 @@ function Stepper({ step }) {
 
                 <div className="min-w-0">
                   <div className="text-[10px] text-slate-500">Step {s.n}</div>
-                  <div className="text-sm font-semibold text-slate-900 truncate">
-                    {s.label}
-                  </div>
+                  <div className="text-sm font-semibold text-slate-900 truncate">{s.label}</div>
                   <div className="text-[11px] text-slate-500 truncate">{s.hint}</div>
                 </div>
               </div>
@@ -340,10 +363,9 @@ function StatPill({ label, value, dotClass }) {
   );
 }
 
-function StatusTimeline({ status}) {
+function StatusTimeline({ status }) {
   const s = String(status || "").toLowerCase();
   const submittedDone = !!status;
-
   const approvedDone = s === "approved";
 
   const items = [
@@ -353,7 +375,6 @@ function StatusTimeline({ status}) {
       done: submittedDone,
       icon: ClipboardList,
     },
- 
     {
       title: "Approved",
       desc: "Admin approved your request",
@@ -384,12 +405,8 @@ function StatusTimeline({ status}) {
 
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-slate-900">
-                    {it.title}
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    {it.done ? "Done" : "Pending"}
-                  </div>
+                  <div className="text-sm font-semibold text-slate-900">{it.title}</div>
+                  <div className="text-xs text-slate-500">{it.done ? "Done" : "Pending"}</div>
                 </div>
                 <div className="text-xs text-slate-500">{it.desc}</div>
 
@@ -414,7 +431,6 @@ function StatusTimeline({ status}) {
   );
 }
 
-/* --------------------------- name helpers --------------------------- */
 function joinName(first, last) {
   const f = String(first || "").trim();
   const l = String(last || "").trim();
@@ -423,10 +439,36 @@ function joinName(first, last) {
 }
 
 export default function Reservation() {
-  const auth = useMemo(() => readAuth(), []);
+  const [auth, setAuth] = useState(() => readAuth());
   const token = useMemo(() => getToken(auth), [auth]);
 
-  const role = auth?.user?.role || null;
+  useEffect(() => {
+    const syncAuth = () => {
+      try {
+        setAuth(readAuth());
+      } catch {
+        setAuth(null);
+      }
+    };
+
+    syncAuth();
+
+    const onStorage = (e) => {
+      if (!e.key || e.key === "auth") syncAuth();
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("auth:changed", syncAuth);
+    window.addEventListener("focus", syncAuth);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("auth:changed", syncAuth);
+      window.removeEventListener("focus", syncAuth);
+    };
+  }, []);
+
+  const role = String(auth?.user?.role || "").toLowerCase();
   const isVisitorLoggedIn = Boolean(auth?.user && role === "visitor");
 
   const jsonHeaders = useMemo(() => {
@@ -435,25 +477,24 @@ export default function Reservation() {
     return h;
   }, [token]);
 
-const todayISO = useMemo(() => todayISODateLocal(), []);
+  const todayISO = useMemo(() => todayISODateLocal(), []);
 
-
-  /* =====================================================================================
-     ✅ Applicant is now the logged-in visitor.
-     - We keep ONLY a small "applicantMeta" state for values not guaranteed in profile
-       (relationship is always required; contact/address can be used as fallback overrides).
-  ===================================================================================== */
   const visitor = auth?.user || {};
 
   const visitorFullName = useMemo(() => {
+    const first = String(visitor.first_name || visitor.firstname || "").trim();
+    const last = String(visitor.last_name || visitor.lastname || "").trim();
+
     const direct =
       visitor.full_name ||
+      visitor.fullName ||
       visitor.name ||
       visitor.profile_name ||
-      joinName(visitor.first_name, visitor.last_name) ||
+      (first || last ? `${first} ${last}`.trim() : "") ||
       visitor.username ||
       visitor.email ||
       "";
+
     return String(direct || "").trim();
   }, [visitor]);
 
@@ -468,12 +509,12 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
   const visitorAddress = useMemo(() => String(visitor.address || "").trim(), [visitor]);
 
   const [applicantMeta, setApplicantMeta] = useState({
+    full_name: "",
     relationship: "",
     contact_number: "",
     address: "",
   });
 
-  // deceased info
   const [deceased, setDeceased] = useState({
     full_name: "",
     date_of_death: "",
@@ -482,99 +523,84 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
     remarks: "",
   });
 
-  // data
   const [plotsFc, setPlotsFc] = useState(null);
   const [loadingPlots, setLoadingPlots] = useState(false);
   const [plotsError, setPlotsError] = useState("");
 
- const burialDateInFuture = useMemo(() => {
-   return isFutureYMD(deceased.date_of_burial, todayISO);
- }, [deceased.date_of_burial, todayISO]);
+  const burialDateInFuture = useMemo(() => {
+    return isFutureYMD(deceased.date_of_burial, todayISO);
+  }, [deceased.date_of_burial, todayISO]);
 
- const burialBeforeDeath = useMemo(() => {
-   return isBeforeYMD(deceased.date_of_burial, deceased.date_of_death);
- }, [deceased.date_of_burial, deceased.date_of_death]);
+  const burialBeforeDeath = useMemo(() => {
+    return isBeforeYMD(deceased.date_of_burial, deceased.date_of_death);
+  }, [deceased.date_of_burial, deceased.date_of_death]);
 
   const deathDateInFuture = useMemo(() => {
     const dod = deceased.date_of_death || "";
     if (!dod) return false;
-    return dod > todayISO; // YYYY-MM-DD compare works
+    return dod > todayISO;
   }, [deceased.date_of_death, todayISO]);
 
-  // reservations
   const [myReservations, setMyReservations] = useState([]);
   const [loadingReservations, setLoadingReservations] = useState(false);
 
-  // wizard state
   const [step, setStep] = useState(1);
   const [selectedPlot, setSelectedPlot] = useState(null);
   const [notes, setNotes] = useState("");
 
-  // reservation created
   const [activeReservation, setActiveReservation] = useState(null);
 
-
-
-  // UI state
   const [q, setQ] = useState("");
   const [onlyAvailable, setOnlyAvailable] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // confirm cancel dialog
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelTargetId, setCancelTargetId] = useState(null);
 
-  // draft saved info
-  const [draftStatus, setDraftStatus] = useState("Idle"); // Idle | Restored | Saved
+  const [draftStatus, setDraftStatus] = useState("Idle");
 
-  // map view
   const [mapCenter, setMapCenter] = useState(GOOGLE_CENTER);
   const [mapZoom, setMapZoom] = useState(19);
 
-  // polling for approval
   const pollRef = useRef(null);
 
-
-
-  // computed applicant (visitor profile + overrides)
   const applicant = useMemo(() => {
+    const full_name = String(applicantMeta.full_name || visitorFullName || "").trim();
     const contact = String(applicantMeta.contact_number || visitorPhone || "").trim();
     const address = String(applicantMeta.address || visitorAddress || "").trim();
     const relationship = String(applicantMeta.relationship || "").trim();
 
     return {
-      full_name: visitorFullName,
+      full_name,
       email: visitorEmail,
       contact_number: contact,
       address,
       relationship,
       _source: {
+        hasProfileName: Boolean(visitorFullName),
         hasProfilePhone: Boolean(visitorPhone),
         hasProfileAddress: Boolean(visitorAddress),
       },
     };
-  }, [applicantMeta, visitorPhone, visitorAddress, visitorEmail, visitorFullName]);
+  }, [applicantMeta, visitorFullName, visitorPhone, visitorAddress, visitorEmail]);
 
-  // scroll to top when step changes
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [step]);
 
-  // restore draft (once)
   useEffect(() => {
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
       if (!raw) return;
       const d = JSON.parse(raw);
 
-      // applicantMeta
       if (d?.applicantMeta) {
         setApplicantMeta((prev) => ({ ...prev, ...d.applicantMeta }));
       } else if (d?.applicant) {
-        // backward support
         setApplicantMeta((prev) => ({
           ...prev,
+          full_name: d?.applicant?.full_name ?? prev.full_name,
           relationship: d?.applicant?.relationship ?? prev.relationship,
           contact_number: d?.applicant?.contact_number ?? prev.contact_number,
           address: d?.applicant?.address ?? prev.address,
@@ -583,12 +609,10 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
 
       if (d?.deceased) {
         const safeDeceased = { ...d.deceased };
-
         const today = todayISODateLocal();
         if (safeDeceased.date_of_death && String(safeDeceased.date_of_death) > today) {
           safeDeceased.date_of_death = "";
         }
-
         setDeceased((prev) => ({ ...prev, ...safeDeceased }));
       }
 
@@ -597,15 +621,14 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
 
       setDraftStatus("Restored");
     } catch {
-      // ignore
+      // ignore bad drafts
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // autosave draft (debounced)
   const draftTimerRef = useRef(null);
   useEffect(() => {
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+
     draftTimerRef.current = setTimeout(() => {
       try {
         localStorage.setItem(
@@ -682,7 +705,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
     fetchMyReservations();
   }, [fetchMyReservations]);
 
-  // derived rows (list helper)
   const rows = useMemo(() => {
     if (!plotsFc?.features) return [];
     return plotsFc.features
@@ -710,9 +732,9 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
     const counts = { available: 0, reserved: 0, occupied: 0, total: rows.length };
     for (const r of rows) {
       const s = String(r.status || "").toLowerCase();
-      if (s === "available") counts.available++;
-      else if (s === "reserved") counts.reserved++;
-      else if (s === "occupied") counts.occupied++;
+      if (s === "available") counts.available += 1;
+      else if (s === "reserved") counts.reserved += 1;
+      else if (s === "occupied") counts.occupied += 1;
     }
     return counts;
   }, [rows]);
@@ -725,7 +747,9 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
           const s = String(r.status || "").toLowerCase();
           if (s !== "available") return false;
         }
+
         if (!text) return true;
+
         return (
           String(r.id || "").toLowerCase().includes(text) ||
           String(r.uid || "").toLowerCase().includes(text) ||
@@ -738,7 +762,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
       .slice(0, 70);
   }, [rows, q, onlyAvailable]);
 
-  // polygons for map (GRAVES ONLY ✅)
   const plotPolygons = useMemo(() => {
     if (!plotsFc?.features) return [];
     const selectedKey = selectedPlot?.id ?? selectedPlot?.uid ?? null;
@@ -763,14 +786,16 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
               typeof lat === "number" && typeof lng === "number" ? { lat, lng } : null
             )
             .filter(Boolean);
-        } else return null;
+        } else {
+          return null;
+        }
 
         if (!coords.length) return null;
 
         const props = f.properties || {};
         const status = String(props.status || "").toLowerCase();
 
-        let fillColor = "#10b981"; // available
+        let fillColor = "#10b981";
         if (status === "reserved") fillColor = "#f59e0b";
         else if (status === "occupied") fillColor = "#ef4444";
 
@@ -852,48 +877,59 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
   const requiredMissing = useMemo(() => {
     const missing = [];
 
-    if (!String(applicant.full_name || "").trim()) missing.push("Your profile name");
-    if (!String(applicant.relationship || "").trim())
-      missing.push("Relationship to deceased");
-    if (!String(applicant.contact_number || "").trim())
-      missing.push("Your profile contact number (or provide one below)");
+    if (!String(applicant.full_name || "").trim()) missing.push("Your full name");
+    if (!String(applicant.relationship || "").trim()) missing.push("Relationship to deceased");
+    if (!String(applicant.contact_number || "").trim()) {
+      missing.push("Your contact number");
+    }
     if (!String(deceased.full_name || "").trim()) missing.push("Deceased full name");
+    if (!String(deceased.date_of_death || "").trim()) missing.push("Date of death");
+    if (!String(deceased.date_of_burial || "").trim()) missing.push("Date of burial");
 
     return missing;
-  }, [applicant.full_name, applicant.relationship, applicant.contact_number, deceased.full_name]);
-
+  }, [
+    applicant.full_name,
+    applicant.relationship,
+    applicant.contact_number,
+    deceased.full_name,
+    deceased.date_of_death,
+    deceased.date_of_burial,
+  ]);
 
   const infoValid = useMemo(() => {
-  const requiredOk =
-    String(applicant.full_name || "").trim().length > 0 &&
-    String(applicant.relationship || "").trim().length > 0 &&
-    String(applicant.contact_number || "").trim().length > 0 &&
-    String(deceased.full_name || "").trim().length > 0;
+    const requiredOk =
+      String(applicant.full_name || "").trim().length > 0 &&
+      String(applicant.relationship || "").trim().length > 0 &&
+      String(applicant.contact_number || "").trim().length > 0 &&
+      String(deceased.full_name || "").trim().length > 0 &&
+      String(deceased.date_of_death || "").trim().length > 0 &&
+      String(deceased.date_of_burial || "").trim().length > 0;
 
-  const deathDateOk = !deathDateInFuture;
-  const burialDateOk = !burialDateInFuture;
+    const deathDateOk = !deathDateInFuture;
+    const burialDateOk = !burialDateInFuture;
+    const orderOk = !burialBeforeDeath;
 
-  // Optional but recommended: if both exist, burial must not be earlier than death
-  const orderOk = !burialBeforeDeath;
-
-  return requiredOk && deathDateOk && burialDateOk && orderOk;
-}, [
-  applicant.full_name,
-  applicant.relationship,
-  applicant.contact_number,
-  deceased.full_name,
-  deathDateInFuture,
-  burialDateInFuture,
-  burialBeforeDeath,
-]);
+    return requiredOk && deathDateOk && burialDateOk && orderOk;
+  }, [
+    applicant.full_name,
+    applicant.relationship,
+    applicant.contact_number,
+    deceased.full_name,
+    deceased.date_of_death,
+    deceased.date_of_burial,
+    deathDateInFuture,
+    burialDateInFuture,
+    burialBeforeDeath,
+  ]);
 
   const dateWarning = useMemo(() => {
     const dod = deceased.date_of_death ? new Date(deceased.date_of_death) : null;
     const dob = deceased.date_of_burial ? new Date(deceased.date_of_burial) : null;
     if (!dod || !dob) return "";
     if (Number.isNaN(dod.getTime()) || Number.isNaN(dob.getTime())) return "";
-    if (dob.getTime() < dod.getTime())
+    if (dob.getTime() < dod.getTime()) {
       return "Date of burial looks earlier than date of death.";
+    }
     return "";
   }, [deceased.date_of_death, deceased.date_of_burial]);
 
@@ -931,7 +967,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
     return `${cleanedBlock}\n\nVisitor Notes\n${extra}`;
   }, [applicant, deceased, notes]);
 
-  /* ---------------- selection actions ---------------- */
   const selectFromList = useCallback((row) => {
     if (!row) return;
 
@@ -943,7 +978,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
 
     setSelectedPlot(row);
     setActiveReservation(null);
-
 
     if (row.lat != null && row.lng != null) {
       setMapCenter({ lat: Number(row.lat), lng: Number(row.lng) });
@@ -964,7 +998,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
 
     setSelectedPlot(plot);
     setActiveReservation(null);
-
 
     if (plot.lat != null && plot.lng != null) {
       setMapCenter({ lat: Number(plot.lat), lng: Number(plot.lng) });
@@ -1026,7 +1059,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
       setActiveReservation(reservation);
       setStep(4);
 
-    toast.success("Reservation submitted! Please wait for admin approval.");
+      toast.success("Reservation submitted! Please wait for admin approval.");
       await fetchPlots();
       await fetchMyReservations();
     } catch (e) {
@@ -1034,7 +1067,15 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
     } finally {
       setSubmitting(false);
     }
-  }, [composedNotesForSubmit, fetchMyReservations, fetchPlots, infoValid, isVisitorLoggedIn, jsonHeaders, selectedPlot]);
+  }, [
+    composedNotesForSubmit,
+    fetchMyReservations,
+    fetchPlots,
+    infoValid,
+    isVisitorLoggedIn,
+    jsonHeaders,
+    selectedPlot,
+  ]);
 
   const cancelReservation = useCallback(
     async (reservationId) => {
@@ -1053,7 +1094,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
         setSelectedPlot(null);
         setActiveReservation(null);
         setNotes("");
-   
+
         setMapCenter(GOOGLE_CENTER);
         setMapZoom(19);
 
@@ -1069,12 +1110,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
     },
     [fetchMyReservations, fetchPlots, token]
   );
-
-  /* ---------------- approval polling (Step 4) ---------------- */
-  const activeReservationStatus = useMemo(() => {
-    const status = activeReservation?.status || "";
-    return String(status).toLowerCase();
-  }, [activeReservation]);
 
   const refreshActiveReservationFromList = useCallback(async () => {
     if (!activeReservation?.id) return;
@@ -1103,11 +1138,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
     };
   }, [activeReservation?.id, activeReservation?.status, refreshActiveReservationFromList, step]);
 
-  /* ---------------- receipt upload ---------------- */
-
-
-
-
   const resetAll = () => {
     setStep(1);
     setSelectedPlot(null);
@@ -1120,6 +1150,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
     setMapZoom(19);
 
     setApplicantMeta({
+      full_name: "",
       relationship: "",
       contact_number: "",
       address: "",
@@ -1179,9 +1210,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
 
   const selectedBadge = selectedPlot ? statusBadgeProps(selectedPlot.status) : null;
   const activeBadge = activeReservation ? statusBadgeProps(activeReservation.status) : null;
-
- 
-
 
   const isPending = String(activeReservation?.status || "").toLowerCase() === "pending";
   const isApproved = String(activeReservation?.status || "").toLowerCase() === "approved";
@@ -1253,7 +1281,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                       <Sparkles className="h-5 w-5 text-emerald-700" />
                     </CardTitle>
                     <CardDescription className="text-slate-600">
-                   Visitor info → deceased details → pick plot → confirm → wait admin approval.
+                      Visitor info → deceased details → pick plot → confirm → wait admin approval.
                     </CardDescription>
                     <div className="mt-2 text-xs text-slate-500">
                       Draft:{" "}
@@ -1273,10 +1301,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                       title="Refresh plots"
                     >
                       <RefreshCcw
-                        className={[
-                          "h-4 w-4 mr-2",
-                          loadingPlots ? "animate-spin" : "",
-                        ].join(" ")}
+                        className={["h-4 w-4 mr-2", loadingPlots ? "animate-spin" : ""].join(" ")}
                       />
                       Refresh plots
                     </Button>
@@ -1298,7 +1323,11 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
 
                 <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <StatPill label="Total plots" value={plotCounts.total} dotClass="bg-slate-400" />
-                  <StatPill label="Available" value={plotCounts.available} dotClass="bg-emerald-500" />
+                  <StatPill
+                    label="Available"
+                    value={plotCounts.available}
+                    dotClass="bg-emerald-500"
+                  />
                   <StatPill label="Reserved" value={plotCounts.reserved} dotClass="bg-amber-400" />
                   <StatPill label="Occupied" value={plotCounts.occupied} dotClass="bg-rose-500" />
                 </div>
@@ -1307,13 +1336,15 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                     <Legend />
                     <div className="text-xs text-slate-500">
-                      Tip: Click an <span className="font-semibold">available</span> plot on the map to select it.
+                      Tip: Click an <span className="font-semibold">available</span> plot on the
+                      map to select it.
                     </div>
                   </div>
                 ) : step === 1 ? (
                   <div className="mt-4 rounded-2xl border bg-white/70 p-3 text-sm text-slate-700 flex gap-2">
                     <Info className="h-4 w-4 mt-0.5 text-slate-500" />
-                    Step 1 is required. Your visitor info is auto-filled. Please complete the deceased details and relationship.
+                    Step 1 is required. Your visitor info is auto-filled when available. If your
+                    account name is missing, enter it manually below.
                   </div>
                 ) : step === 3 ? (
                   <div className="mt-4 rounded-2xl border bg-white/70 p-3 text-sm text-slate-700 flex gap-2">
@@ -1353,7 +1384,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                   Login required
                 </AlertTitle>
                 <AlertDescription className="text-rose-700">
-                  Please login as a visitor to reserve
+                  Please login as a visitor to reserve.
                 </AlertDescription>
               </Alert>
             </div>
@@ -1364,7 +1395,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
       <section className="pb-10">
         <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 space-y-4">
-            {/* STEP 1: DETAILS FORM */}
             {step === 1 && (
               <Card className="rounded-2xl overflow-hidden">
                 <CardHeader className="pb-2">
@@ -1373,7 +1403,8 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                     Step 1: Visitor & deceased details
                   </CardTitle>
                   <CardDescription>
-                    Visitor info is auto-filled from your logged-in account. Please complete relationship and deceased info.
+                    Visitor info is auto-filled from your logged-in account when available. Please
+                    complete relationship and deceased info.
                   </CardDescription>
                 </CardHeader>
 
@@ -1403,17 +1434,45 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                     </div>
                   ) : null}
 
+                  {burialDateInFuture ? (
+                    <div className="rounded-2xl border bg-rose-50 p-3 text-sm text-rose-900">
+                      <div className="font-semibold">Invalid date of burial</div>
+                      <div className="text-xs text-rose-800 mt-1">
+                        Date of burial cannot be later than today ({todayISO}).
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* Visitor card */}
                     <div className="rounded-2xl border bg-white p-4 space-y-3">
                       <div className="text-sm font-bold text-slate-900">Visitor (logged-in)</div>
 
-                      <div className="rounded-2xl border bg-slate-50 p-3">
-                        <div className="text-xs text-slate-500">Full name</div>
-                        <div className="font-semibold text-slate-900 break-words">
-                          {applicant.full_name || "—"}
+                      {applicant._source?.hasProfileName ? (
+                        <div className="rounded-2xl border bg-slate-50 p-3">
+                          <div className="text-xs text-slate-500">Full name</div>
+                          <div className="font-semibold text-slate-900 break-words">
+                            {applicant.full_name || "—"}
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          <Label>
+                            Your full name <span className="text-rose-600">*</span>
+                          </Label>
+                          <Input
+                            value={applicantMeta.full_name}
+                            onChange={(e) =>
+                              setApplicantMeta((v) => ({ ...v, full_name: e.target.value }))
+                            }
+                            placeholder="Juan Dela Cruz"
+                            className="rounded-xl"
+                          />
+                          <div className="text-[11px] text-slate-500">
+                            Your account does not currently provide a name, so enter it here to
+                            continue.
+                          </div>
+                        </div>
+                      )}
 
                       <div className="rounded-2xl border bg-slate-50 p-3">
                         <div className="text-xs text-slate-500">Email</div>
@@ -1461,7 +1520,8 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                             inputMode="tel"
                           />
                           <div className="text-[11px] text-slate-500">
-                            Your profile has no contact number. Provide one here so the admin can reach you.
+                            Your profile has no contact number. Provide one here so the admin can
+                            reach you.
                           </div>
                         </div>
                       )}
@@ -1489,11 +1549,11 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
 
                       <div className="rounded-2xl border bg-white/70 p-3 text-sm text-slate-700 flex gap-2">
                         <Info className="h-4 w-4 mt-0.5 text-slate-500" />
-                        Visitor fields come from your logged-in account. Relationship is required for this request.
+                        Visitor fields come from your logged-in account when present. Missing name
+                        or phone can be entered manually here.
                       </div>
                     </div>
 
-                    {/* Deceased details */}
                     <div className="rounded-2xl border bg-white p-4 space-y-3">
                       <div className="text-sm font-bold text-slate-900">Deceased details</div>
 
@@ -1524,7 +1584,9 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="space-y-1.5">
-                          <Label>Date of death</Label>
+                          <Label>
+                            Date of death <span className="text-rose-600">*</span>
+                          </Label>
                           <Input
                             type="date"
                             value={deceased.date_of_death}
@@ -1544,13 +1606,23 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                         </div>
 
                         <div className="space-y-1.5">
-                          <Label>Date of burial</Label>
+                          <Label>
+                            Date of burial <span className="text-rose-600">*</span>
+                          </Label>
                           <Input
                             type="date"
                             value={deceased.date_of_burial}
-                            onChange={(e) =>
-                              setDeceased((v) => ({ ...v, date_of_burial: e.target.value }))
-                            }
+                            max={todayISO}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v && v > todayISO) {
+                                toast.error(
+                                  `Date of burial cannot be in the future. Max allowed is ${todayISO}.`
+                                );
+                                return;
+                              }
+                              setDeceased((prev) => ({ ...prev, date_of_burial: v }));
+                            }}
                             className="rounded-xl"
                           />
                         </div>
@@ -1592,8 +1664,8 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                         !isVisitorLoggedIn
                           ? "Login required"
                           : !infoValid
-                          ? "Complete required fields"
-                          : ""
+                            ? "Complete required fields"
+                            : ""
                       }
                     >
                       Continue to map
@@ -1604,7 +1676,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
               </Card>
             )}
 
-            {/* STEP 2: MAP PICK (GRAVES ONLY ✅ no roads) */}
             {step === 2 && (
               <Card className="overflow-hidden rounded-2xl">
                 <CardHeader className="pb-2">
@@ -1613,8 +1684,8 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                     Step 2: Pick a grave on the map
                   </CardTitle>
                   <CardDescription>
-                    Click an <span className="font-semibold">available</span> plot to select it. Optional:
-                    use search below.
+                    Click an <span className="font-semibold">available</span> plot to select it.
+                    Optional: use search below.
                   </CardDescription>
                 </CardHeader>
 
@@ -1645,10 +1716,10 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                         showGeofence={true}
                         restrictToGeofence={true}
                         polygons={plotPolygons}
-                        polylines={[]} // ✅ REMOVED yellow road lines (graves only)
+                        polylines={[]}
                         markers={[]}
                         onEditPlot={(poly) => pickPlotOnMap(poly)}
-                        showInitialRoads={false} // ✅ ensure default roads stay hidden
+                        showInitialRoads={false}
                       />
                     )}
                   </div>
@@ -1690,7 +1761,9 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                     <div className="flex items-center justify-between text-xs text-slate-500">
                       <div>
                         Showing{" "}
-                        <span className="font-semibold text-slate-700">{filteredRows.length}</span>{" "}
+                        <span className="font-semibold text-slate-700">
+                          {filteredRows.length}
+                        </span>{" "}
                         result(s)
                       </div>
                       {loadingPlots ? (
@@ -1711,8 +1784,12 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                             const key = `${r.id || ""}-${r.uid || ""}-${r.plot_name || ""}`;
                             const isSelected =
                               selectedPlot &&
-                              ((r.id && selectedPlot.id && String(r.id) === String(selectedPlot.id)) ||
-                                (r.uid && selectedPlot.uid && String(r.uid) === String(selectedPlot.uid)));
+                              ((r.id &&
+                                selectedPlot.id &&
+                                String(r.id) === String(selectedPlot.id)) ||
+                                (r.uid &&
+                                  selectedPlot.uid &&
+                                  String(r.uid) === String(selectedPlot.uid)));
 
                             return (
                               <li
@@ -1802,7 +1879,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
               </Card>
             )}
 
-            {/* STEP 3: CONFIRM */}
             {step === 3 && (
               <Card className="rounded-2xl overflow-hidden">
                 <CardHeader className="pb-2">
@@ -1819,7 +1895,9 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                   {!infoValid ? (
                     <Alert variant="destructive" className="border-rose-200 rounded-2xl">
                       <AlertTitle>Complete details first</AlertTitle>
-                      <AlertDescription>Please go back to Step 1 and fill the required fields.</AlertDescription>
+                      <AlertDescription>
+                        Please go back to Step 1 and fill the required fields.
+                      </AlertDescription>
                     </Alert>
                   ) : !selectedPlot ? (
                     <Alert variant="destructive" className="border-rose-200 rounded-2xl">
@@ -1839,19 +1917,30 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                               {applicant.relationship || "—"} • {applicant.contact_number || "—"}
                             </div>
                           </div>
-                          <Button variant="outline" className="rounded-xl" onClick={() => setStep(1)} disabled={submitting}>
+                          <Button
+                            variant="outline"
+                            className="rounded-xl"
+                            onClick={() => setStep(1)}
+                            disabled={submitting}
+                          >
                             Edit details
                           </Button>
                         </div>
 
                         <div className="rounded-2xl border bg-slate-50 p-3 text-sm">
                           <div className="text-xs text-slate-500">Deceased</div>
-                          <div className="font-semibold text-slate-900">{deceased.full_name || "—"}</div>
+                          <div className="font-semibold text-slate-900">
+                            {deceased.full_name || "—"}
+                          </div>
                           <div className="text-xs text-slate-600 mt-1">
-                            {deceased.date_of_death ? `Date of death: ${deceased.date_of_death}` : "Date of death: —"}
+                            {deceased.date_of_death
+                              ? `Date of death: ${deceased.date_of_death}`
+                              : "Date of death: —"}
                           </div>
                           <div className="text-xs text-slate-600">
-                            {deceased.date_of_burial ? `Date of burial: ${deceased.date_of_burial}` : "Date of burial: —"}
+                            {deceased.date_of_burial
+                              ? `Date of burial: ${deceased.date_of_burial}`
+                              : "Date of burial: —"}
                           </div>
                         </div>
                       </div>
@@ -1864,8 +1953,8 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                               {selectedPlot.plot_name ?? "—"}
                             </div>
                             <div className="text-xs text-slate-500 mt-1">
-                              {selectedPlot.plot_type ?? "—"} • {selectedPlot.size_sqm ?? "—"} sqm • ₱
-                              {formatPrice(selectedPlot.price)}
+                              {selectedPlot.plot_type ?? "—"} • {selectedPlot.size_sqm ?? "—"} sqm
+                              • ₱{formatPrice(selectedPlot.price)}
                             </div>
                           </div>
                           <Badge className={statusBadgeProps(selectedPlot.status).className}>
@@ -1874,12 +1963,21 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                         </div>
 
                         <div className="mt-3 grid grid-cols-2 gap-2">
-                          <Button variant="outline" className="rounded-xl" onClick={() => setStep(2)} disabled={submitting}>
+                          <Button
+                            variant="outline"
+                            className="rounded-xl"
+                            onClick={() => setStep(2)}
+                            disabled={submitting}
+                          >
                             <ArrowLeft className="h-4 w-4 mr-2" />
                             Change plot
                           </Button>
 
-                          <Button className="rounded-xl" onClick={() => setDetailsOpen(true)} disabled={!selectedPlot}>
+                          <Button
+                            className="rounded-xl"
+                            onClick={() => setDetailsOpen(true)}
+                            disabled={!selectedPlot}
+                          >
                             View preview
                             <ArrowRight className="h-4 w-4 ml-2" />
                           </Button>
@@ -1895,7 +1993,8 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                       <div className="rounded-2xl border bg-white p-4">
                         <div className="text-sm font-bold text-slate-900">Extra notes (optional)</div>
                         <div className="text-xs text-slate-500 mt-0.5">
-                          Your visitor/deceased details are included automatically in the notes sent to the admin.
+                          Your visitor/deceased details are included automatically in the notes sent
+                          to the admin.
                         </div>
 
                         <textarea
@@ -1907,7 +2006,12 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                         />
 
                         <div className="mt-4 grid grid-cols-2 gap-2">
-                          <Button variant="outline" className="rounded-xl" onClick={() => setStep(2)} disabled={submitting}>
+                          <Button
+                            variant="outline"
+                            className="rounded-xl"
+                            onClick={() => setStep(2)}
+                            disabled={submitting}
+                          >
                             <ArrowLeft className="h-4 w-4 mr-2" />
                             Back
                           </Button>
@@ -1937,17 +2041,16 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
               </Card>
             )}
 
-            {/* STEP 4: UPLOAD RECEIPT + WAIT APPROVAL */}
             {step === 4 && (
               <Card className="rounded-2xl overflow-hidden">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2">
-               <Loader2 className="h-5 w-5 text-emerald-700" />
-                   Step 4: Wait for admin approval
+                    <Loader2 className="h-5 w-5 text-emerald-700" />
+                    Step 4: Wait for admin approval
                   </CardTitle>
                   <CardDescription>
-                   Admin will review your reservation. Auto-refresh runs every ~8 seconds while pending.
-                   </CardDescription>
+                    Admin will review your reservation. Auto-refresh runs every ~8 seconds while pending.
+                  </CardDescription>
                 </CardHeader>
 
                 <CardContent className="space-y-3">
@@ -1966,7 +2069,9 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <div className="text-xs text-slate-500">Reservation</div>
-                            <div className="text-base font-bold text-slate-900">#{activeReservation.id}</div>
+                            <div className="text-base font-bold text-slate-900">
+                              #{activeReservation.id}
+                            </div>
                             <div className="text-xs text-slate-500 mt-1">
                               Plot:{" "}
                               <span className="font-semibold text-slate-700">
@@ -1978,7 +2083,9 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                             </div>
                           </div>
 
-                          {activeBadge ? <Badge className={activeBadge.className}>{activeBadge.label}</Badge> : null}
+                          {activeBadge ? (
+                            <Badge className={activeBadge.className}>{activeBadge.label}</Badge>
+                          ) : null}
                         </div>
 
                         <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1988,7 +2095,12 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                             disabled={loadingReservations}
                             className="rounded-xl"
                           >
-                            <RefreshCcw className={["h-4 w-4 mr-2", loadingReservations ? "animate-spin" : ""].join(" ")} />
+                            <RefreshCcw
+                              className={[
+                                "h-4 w-4 mr-2",
+                                loadingReservations ? "animate-spin" : "",
+                              ].join(" ")}
+                            />
                             Refresh
                           </Button>
 
@@ -2017,9 +2129,7 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                           </Button>
                         </div>
 
-                      
-
-                   {isPending ? (
+                        {isPending ? (
                           <div className="mt-3 rounded-2xl border bg-amber-50 p-3 text-sm text-amber-900">
                             <div className="flex items-center gap-2 font-semibold">
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -2042,7 +2152,10 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                             </div>
 
                             <div className="mt-3">
-                              <Button asChild className="bg-emerald-600 hover:bg-emerald-700 rounded-xl">
+                              <Button
+                                asChild
+                                className="bg-emerald-600 hover:bg-emerald-700 rounded-xl"
+                              >
                                 <NavLink
                                   to={buildInquireLink({
                                     plotId: activeReservation.plot_id,
@@ -2068,7 +2181,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                         ) : null}
                       </div>
 
-
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <Button variant="outline" onClick={resetAll} className="rounded-xl">
                           New reservation
@@ -2084,7 +2196,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
             )}
           </div>
 
-          {/* RIGHT PANEL */}
           <div className="space-y-4 lg:sticky lg:top-24 h-fit">
             <Card className="rounded-2xl overflow-hidden">
               <CardHeader className="pb-2">
@@ -2092,19 +2203,19 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                   {step === 1
                     ? "Enter details"
                     : step === 2
-                    ? "Pick a grave"
-                    : step === 3
-                    ? "Confirm and submit"
-                    : "Quick actions"}
+                      ? "Pick a grave"
+                      : step === 3
+                        ? "Confirm and submit"
+                        : "Quick actions"}
                 </CardTitle>
                 <CardDescription>
                   {step === 1
-                    ? "Visitor is auto-filled. Complete relationship & deceased details."
+                    ? "Visitor is auto-filled when possible. Complete relationship, name, and deceased details."
                     : step === 2
-                    ? "Select an available plot on the map, then continue."
-                    : step === 3
-                    ? "Review and submit your reservation."
-               : "Wait for admin approval."}
+                      ? "Select an available plot on the map, then continue."
+                      : step === 3
+                        ? "Review and submit your reservation."
+                        : "Wait for admin approval."}
                 </CardDescription>
               </CardHeader>
 
@@ -2115,7 +2226,8 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                     {applicant.full_name || "Not set"}
                   </div>
                   <div className="text-xs text-slate-500">
-                    {applicant.relationship || "Relationship: —"} • {applicant.contact_number || "Contact: —"}
+                    {applicant.relationship || "Relationship: —"} •{" "}
+                    {applicant.contact_number || "Contact: —"}
                   </div>
 
                   <div className="pt-2 border-t">
@@ -2141,15 +2253,23 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                       </div>
                       <div className="text-xs text-slate-500">
                         {selectedPlot
-                          ? `${selectedPlot.plot_type} • ${selectedPlot.size_sqm} sqm • ₱${formatPrice(selectedPlot.price)}`
+                          ? `${selectedPlot.plot_type} • ${selectedPlot.size_sqm} sqm • ₱${formatPrice(
+                              selectedPlot.price
+                            )}`
                           : "Pick an available plot on the map."}
                       </div>
                     </div>
-                    {selectedBadge ? <Badge className={selectedBadge.className}>{selectedBadge.label}</Badge> : null}
+                    {selectedBadge ? (
+                      <Badge className={selectedBadge.className}>{selectedBadge.label}</Badge>
+                    ) : null}
                   </div>
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    <Button variant="outline" onClick={() => setDetailsOpen(true)} className="rounded-xl">
+                    <Button
+                      variant="outline"
+                      onClick={() => setDetailsOpen(true)}
+                      className="rounded-xl"
+                    >
                       View
                     </Button>
 
@@ -2175,7 +2295,9 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                       <Button
                         className="bg-emerald-600 hover:bg-emerald-700 rounded-xl"
                         onClick={submitReservation}
-                        disabled={!isVisitorLoggedIn || submitting || !canReserve || !infoValid || !selectedPlot}
+                        disabled={
+                          !isVisitorLoggedIn || submitting || !canReserve || !infoValid || !selectedPlot
+                        }
                       >
                         {submitting ? (
                           <span className="flex items-center justify-center gap-2">
@@ -2190,7 +2312,10 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                         )}
                       </Button>
                     ) : (
-                      <Button className="bg-emerald-600 hover:bg-emerald-700 rounded-xl" onClick={resetAll}>
+                      <Button
+                        className="bg-emerald-600 hover:bg-emerald-700 rounded-xl"
+                        onClick={resetAll}
+                      >
                         New
                         <ArrowRight className="h-4 w-4 ml-2" />
                       </Button>
@@ -2217,7 +2342,12 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                         disabled={loadingReservations}
                         className="rounded-xl"
                       >
-                        <RefreshCcw className={["h-4 w-4 mr-2", loadingReservations ? "animate-spin" : ""].join(" ")} />
+                        <RefreshCcw
+                          className={[
+                            "h-4 w-4 mr-2",
+                            loadingReservations ? "animate-spin" : "",
+                          ].join(" ")}
+                        />
                         Refresh
                       </Button>
                       <Button
@@ -2235,7 +2365,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
               </CardContent>
             </Card>
 
-            {/* My reservations */}
             <Card className="rounded-2xl">
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-2">
@@ -2254,7 +2383,9 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
                       disabled={loadingReservations}
                       title="Refresh"
                     >
-                      <RefreshCcw className={["h-4 w-4", loadingReservations ? "animate-spin" : ""].join(" ")} />
+                      <RefreshCcw
+                        className={["h-4 w-4", loadingReservations ? "animate-spin" : ""].join(" ")}
+                      />
                     </Button>
                   ) : null}
                 </div>
@@ -2303,7 +2434,6 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
         </div>
       </section>
 
-      {/* Mobile sticky CTA */}
       <div className="fixed bottom-3 left-0 right-0 z-40 px-4 lg:hidden">
         <div className="mx-auto max-w-3xl rounded-2xl border bg-white/80 backdrop-blur shadow-lg p-3">
           <div className="flex items-center justify-between gap-3">
@@ -2359,201 +2489,196 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
           </div>
         </div>
       </div>
-{/* Details Modal */}
-<Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-  <DialogContent className="sm:max-w-[640px] max-h-[85vh] overflow-hidden p-0">
-    {/* header stays fixed */}
-    <div className="p-6 pb-4">
-      <DialogHeader>
-        <DialogTitle>Reservation Preview</DialogTitle>
-        <DialogDescription>
-          Review visitor/deceased details and selected plot.
-        </DialogDescription>
-      </DialogHeader>
-    </div>
 
-    {/* scrollable body */}
-    <div className="px-6 pb-6 overflow-y-auto max-h-[calc(85vh-160px)]">
-      <div className="space-y-3">
-        <div className="rounded-2xl border bg-white p-3 space-y-2">
-          <div className="text-sm font-bold text-slate-900">Visitor (Applicant)</div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-            <div className="rounded-2xl border bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">Full name</div>
-              <div className="font-semibold text-slate-900">
-                {applicant.full_name || "—"}
-              </div>
-            </div>
-            <div className="rounded-2xl border bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">Relationship</div>
-              <div className="font-semibold text-slate-900">
-                {applicant.relationship || "—"}
-              </div>
-            </div>
-            <div className="rounded-2xl border bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">Contact number</div>
-              <div className="font-semibold text-slate-900">
-                {applicant.contact_number || "—"}
-              </div>
-            </div>
-            <div className="rounded-2xl border bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">Email</div>
-              <div className="font-semibold text-slate-900">
-                {applicant.email || "—"}
-              </div>
-            </div>
+      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <DialogContent className="sm:max-w-[640px] max-h-[85vh] overflow-hidden p-0">
+          <div className="p-6 pb-4">
+            <DialogHeader>
+              <DialogTitle>Reservation Preview</DialogTitle>
+              <DialogDescription>
+                Review visitor/deceased details and selected plot.
+              </DialogDescription>
+            </DialogHeader>
           </div>
 
-          <div className="rounded-2xl border bg-slate-50 p-3">
-            <div className="text-xs text-slate-500">Address</div>
-            <div className="font-semibold text-slate-900 break-words">
-              {applicant.address || "—"}
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border bg-white p-3 space-y-2">
-          <div className="text-sm font-bold text-slate-900">Deceased</div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-            <div className="rounded-2xl border bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">Full name</div>
-              <div className="font-semibold text-slate-900">
-                {deceased.full_name || "—"}
-              </div>
-            </div>
-            <div className="rounded-2xl border bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">Age</div>
-              <div className="font-semibold text-slate-900">
-                {deceased.age || "—"}
-              </div>
-            </div>
-            <div className="rounded-2xl border bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">Date of death</div>
-              <div className="font-semibold text-slate-900">
-                {deceased.date_of_death || "—"}
-              </div>
-            </div>
-            <div className="rounded-2xl border bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">Date of burial</div>
-              <div className="font-semibold text-slate-900">
-                {deceased.date_of_burial || "—"}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border bg-slate-50 p-3">
-            <div className="text-xs text-slate-500">Remarks</div>
-            <div className="font-semibold text-slate-900 break-words">
-              {deceased.remarks || "—"}
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border bg-white p-3 space-y-2">
-          <div className="text-sm font-bold text-slate-900">Selected plot</div>
-
-          {!selectedPlot ? (
-            <Alert className="rounded-2xl">
-              <AlertTitle>No plot selected</AlertTitle>
-              <AlertDescription>Please select an available plot on the map.</AlertDescription>
-            </Alert>
-          ) : (
-            <div className="rounded-2xl border bg-white p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="text-base font-bold text-slate-900">
-                    {selectedPlot.plot_name ?? "—"}
+          <div className="px-6 pb-6 overflow-y-auto max-h-[calc(85vh-160px)]">
+            <div className="space-y-3">
+              <div className="rounded-2xl border bg-white p-3 space-y-2">
+                <div className="text-sm font-bold text-slate-900">Visitor (Applicant)</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                  <div className="rounded-2xl border bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Full name</div>
+                    <div className="font-semibold text-slate-900">{applicant.full_name || "—"}</div>
                   </div>
-                  <div className="text-sm text-slate-600">
-                    {selectedPlot.plot_type ?? "—"} • {selectedPlot.size_sqm ?? "—"} sqm
+                  <div className="rounded-2xl border bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Relationship</div>
+                    <div className="font-semibold text-slate-900">
+                      {applicant.relationship || "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Contact number</div>
+                    <div className="font-semibold text-slate-900">
+                      {applicant.contact_number || "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Email</div>
+                    <div className="font-semibold text-slate-900">{applicant.email || "—"}</div>
                   </div>
                 </div>
-                <Badge className={statusBadgeProps(selectedPlot.status).className}>
-                  {statusBadgeProps(selectedPlot.status).label}
-                </Badge>
-              </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Price</div>
-                  <div className="font-bold text-slate-900">
-                    ₱{formatPrice(selectedPlot.price)}
-                  </div>
-                </div>
-                <div className="rounded-2xl border bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">Type</div>
-                  <div className="font-bold text-slate-900">
-                    {selectedPlot.plot_type ?? "—"}
+                  <div className="text-xs text-slate-500">Address</div>
+                  <div className="font-semibold text-slate-900 break-words">
+                    {applicant.address || "—"}
                   </div>
                 </div>
               </div>
+
+              <div className="rounded-2xl border bg-white p-3 space-y-2">
+                <div className="text-sm font-bold text-slate-900">Deceased</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                  <div className="rounded-2xl border bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Full name</div>
+                    <div className="font-semibold text-slate-900">
+                      {deceased.full_name || "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Age</div>
+                    <div className="font-semibold text-slate-900">{deceased.age || "—"}</div>
+                  </div>
+                  <div className="rounded-2xl border bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Date of death</div>
+                    <div className="font-semibold text-slate-900">
+                      {deceased.date_of_death || "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Date of burial</div>
+                    <div className="font-semibold text-slate-900">
+                      {deceased.date_of_burial || "—"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border bg-slate-50 p-3">
+                  <div className="text-xs text-slate-500">Remarks</div>
+                  <div className="font-semibold text-slate-900 break-words">
+                    {deceased.remarks || "—"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-3 space-y-2">
+                <div className="text-sm font-bold text-slate-900">Selected plot</div>
+
+                {!selectedPlot ? (
+                  <Alert className="rounded-2xl">
+                    <AlertTitle>No plot selected</AlertTitle>
+                    <AlertDescription>
+                      Please select an available plot on the map.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <div className="rounded-2xl border bg-white p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-base font-bold text-slate-900">
+                          {selectedPlot.plot_name ?? "—"}
+                        </div>
+                        <div className="text-sm text-slate-600">
+                          {selectedPlot.plot_type ?? "—"} • {selectedPlot.size_sqm ?? "—"} sqm
+                        </div>
+                      </div>
+                      <Badge className={statusBadgeProps(selectedPlot.status).className}>
+                        {statusBadgeProps(selectedPlot.status).label}
+                      </Badge>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                      <div className="rounded-2xl border bg-slate-50 p-3">
+                        <div className="text-xs text-slate-500">Price</div>
+                        <div className="font-bold text-slate-900">
+                          ₱{formatPrice(selectedPlot.price)}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border bg-slate-50 p-3">
+                        <div className="text-xs text-slate-500">Type</div>
+                        <div className="font-bold text-slate-900">
+                          {selectedPlot.plot_type ?? "—"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border bg-white p-3 text-sm text-slate-700">
+                <div className="font-semibold mb-1">Notes that will be sent</div>
+                <pre className="whitespace-pre-wrap break-words text-slate-700 text-xs">
+                  {composedNotesForSubmit || "—"}
+                </pre>
+              </div>
             </div>
-          )}
-        </div>
+          </div>
 
-        <div className="rounded-2xl border bg-white p-3 text-sm text-slate-700">
-          <div className="font-semibold mb-1">Notes that will be sent</div>
-          <pre className="whitespace-pre-wrap break-words text-slate-700 text-xs">
-            {composedNotesForSubmit || "—"}
-          </pre>
-        </div>
-      </div>
-    </div>
+          <div className="border-t bg-white px-6 py-4">
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                onClick={() => setDetailsOpen(false)}
+                className="rounded-xl"
+              >
+                Close
+              </Button>
 
-    {/* footer stays fixed */}
-    <div className="border-t bg-white px-6 py-4">
-      <DialogFooter className="gap-2 sm:gap-0">
-        <Button variant="outline" onClick={() => setDetailsOpen(false)} className="rounded-xl">
-          Close
-        </Button>
+              {step === 1 ? (
+                <Button
+                  onClick={() => {
+                    setDetailsOpen(false);
+                    goToMapStep();
+                  }}
+                  disabled={!isVisitorLoggedIn || !infoValid}
+                  className="rounded-xl"
+                >
+                  Continue to map
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Button>
+              ) : step === 2 ? (
+                <Button
+                  onClick={() => {
+                    setDetailsOpen(false);
+                    goToConfirmStep();
+                  }}
+                  disabled={!selectedPlot || !isVisitorLoggedIn || !canReserve || !infoValid}
+                  className="rounded-xl"
+                >
+                  Continue
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Button>
+              ) : step === 3 ? (
+                <Button
+                  className="bg-emerald-600 hover:bg-emerald-700 rounded-xl"
+                  onClick={() => {
+                    setDetailsOpen(false);
+                    submitReservation();
+                  }}
+                  disabled={!isVisitorLoggedIn || submitting || !canReserve || !selectedPlot || !infoValid}
+                >
+                  Submit reservation
+                </Button>
+              ) : (
+                <Button onClick={() => setDetailsOpen(false)} className="rounded-xl">
+                  Okay
+                </Button>
+              )}
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
 
-        {step === 1 ? (
-          <Button
-            onClick={() => {
-              setDetailsOpen(false);
-              goToMapStep();
-            }}
-            disabled={!isVisitorLoggedIn || !infoValid}
-            className="rounded-xl"
-          >
-            Continue to map
-            <ArrowRight className="h-4 w-4 ml-2" />
-          </Button>
-        ) : step === 2 ? (
-          <Button
-            onClick={() => {
-              setDetailsOpen(false);
-              goToConfirmStep();
-            }}
-            disabled={!selectedPlot || !isVisitorLoggedIn || !canReserve || !infoValid}
-            className="rounded-xl"
-          >
-            Continue
-            <ArrowRight className="h-4 w-4 ml-2" />
-          </Button>
-        ) : step === 3 ? (
-          <Button
-            className="bg-emerald-600 hover:bg-emerald-700 rounded-xl"
-            onClick={() => {
-              setDetailsOpen(false);
-              submitReservation();
-            }}
-            disabled={!isVisitorLoggedIn || submitting || !canReserve || !selectedPlot || !infoValid}
-          >
-            Submit reservation
-          </Button>
-        ) : (
-          <Button onClick={() => setDetailsOpen(false)} className="rounded-xl">
-            Okay
-          </Button>
-        )}
-      </DialogFooter>
-    </div>
-  </DialogContent>
-</Dialog>
-
-
-      {/* Cancel confirm modal */}
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
@@ -2595,3 +2720,4 @@ const todayISO = useMemo(() => todayISODateLocal(), []);
     </div>
   );
 }
+ 

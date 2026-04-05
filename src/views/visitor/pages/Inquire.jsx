@@ -43,6 +43,7 @@ import {
   Users,
   UploadCloud,
   FileText,
+  Search,
 } from "lucide-react";
 
 // ✅ Map
@@ -200,6 +201,33 @@ function extractPlotIdAny(r) {
 }
 
 const getRowPlotId = (r) => extractPlotIdAny(r);
+
+function extractBurialSearchName(row) {
+  return String(row?.person_full_name ?? row?.deceased_name ?? row?.name ?? "").trim();
+}
+
+function extractBurialSearchPlotId(row) {
+  return (
+    row?.plot_id ??
+    row?.plotId ??
+    row?.id ??
+    row?.plot?.id ??
+    row?.plot?.plot_id ??
+    null
+  );
+}
+
+function extractBurialSearchPlotLabel(row) {
+  const direct =
+    row?.plot_name ??
+    row?.plot_code ??
+    row?.plot_uid ??
+    row?.plot?.plot_name ??
+    row?.plot?.plot_code ??
+    extractBurialSearchPlotId(row);
+  return direct == null ? "—" : String(direct);
+}
+
 
 /* -------------------- file url helpers (uploads) -------------------- */
 function apiOriginFromBase(base) {
@@ -449,6 +477,16 @@ export default function Inquire() {
     if (t === "maintenance" || t === "burial") setRequestType(t);
   }, [location.search]);
 
+  useEffect(() => {
+    if (requestType !== "maintenance") {
+      setMaintenanceLookupMode("family");
+      setExternalSearchQ("");
+      setExternalSearchError("");
+      setExternalSearchRows([]);
+      setSelectedSearchRecord(null);
+    }
+  }, [requestType]);
+
   // deceased options
   const [deceasedOptions, setDeceasedOptions] = useState([]); // [{ name, plot_id? }]
   const deceasedNameToPlotId = useMemo(() => {
@@ -465,6 +503,13 @@ export default function Inquire() {
 
   const [namesLoading, setNamesLoading] = useState(false);
   const [namesError, setNamesError] = useState("");
+
+  const [maintenanceLookupMode, setMaintenanceLookupMode] = useState("family");
+  const [externalSearchQ, setExternalSearchQ] = useState("");
+  const [externalSearchBusy, setExternalSearchBusy] = useState(false);
+  const [externalSearchError, setExternalSearchError] = useState("");
+  const [externalSearchRows, setExternalSearchRows] = useState([]);
+  const [selectedSearchRecord, setSelectedSearchRecord] = useState(null);
 
   // shared deceased name input
   const [selectedName, setSelectedName] = useState("");
@@ -678,6 +723,34 @@ export default function Inquire() {
     loadPlotsGeo();
   }, [loadPlotsGeo]);
 
+
+  const searchBuriedPlots = useCallback(async () => {
+    const q = String(externalSearchQ || "").trim();
+    if (!q) {
+      setExternalSearchRows([]);
+      setExternalSearchError("");
+      return;
+    }
+
+    try {
+      setExternalSearchBusy(true);
+      setExternalSearchError("");
+
+      const urls = [
+        `${API_BASE}/visitor/burial-records?q=${encodeURIComponent(q)}&limit=10`,
+      ];
+
+      const { body } = await fetchFirstOk(urls, { headers: headersAuth });
+      const rows = extractArray(body);
+      setExternalSearchRows(rows);
+    } catch (e) {
+      setExternalSearchRows([]);
+      setExternalSearchError(e?.message || "Failed to search burial records.");
+    } finally {
+      setExternalSearchBusy(false);
+    }
+  }, [externalSearchQ, headersAuth]);
+
   /* -------------------- Prefill from query params / localStorage -------------------- */
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -800,9 +873,22 @@ export default function Inquire() {
           return;
         }
 
+        const maintenanceNoteParts = [String(maintenanceForm.description || "").trim()];
+        if (linkedPlotId) {
+          maintenanceNoteParts.push(`Linked plot ID: ${String(linkedPlotId)}`);
+        }
+        if (selectedSearchRecord) {
+          maintenanceNoteParts.push(
+            `Selected from search: ${extractBurialSearchName(selectedSearchRecord) || dn}`
+          );
+          maintenanceNoteParts.push(
+            `Selected plot label: ${extractBurialSearchPlotLabel(selectedSearchRecord)}`
+          );
+        }
+
         const payload = {
           deceased_name: dn,
-          description: String(maintenanceForm.description || "").trim(),
+          description: maintenanceNoteParts.filter(Boolean).join("\n"),
           priority: maintenanceForm.priority,
           preferred_date: maintenanceForm.preferredDate,
           preferred_time: maintenanceForm.preferredTime,
@@ -1306,6 +1392,7 @@ export default function Inquire() {
 
                       setManualPlotId(null);
                       setPrefillReservationId(null);
+                      setSelectedSearchRecord(null);
                     }}
                     disabled={
                       !isVisitorLoggedIn ||
@@ -1344,11 +1431,143 @@ export default function Inquire() {
                       setDeceasedName(v);
                       setSelectedName("");
                       setPrefillReservationId(null);
+                      setSelectedSearchRecord(null);
                     }}
                     placeholder="Or type full name"
                     disabled={!isVisitorLoggedIn || submitting}
                     className="bg-white/70"
                   />
+
+                  {requestType === "maintenance" ? (
+                    <div className="rounded-2xl border bg-white/60 p-4 space-y-3">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                        <Wrench className="h-4 w-4 text-emerald-600" />
+                        Maintenance lookup
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant={maintenanceLookupMode === "family" ? "default" : "outline"}
+                          className="justify-start"
+                          onClick={() => setMaintenanceLookupMode("family")}
+                          disabled={!isVisitorLoggedIn || submitting}
+                        >
+                          Select from my burial-family list
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant={maintenanceLookupMode === "search" ? "default" : "outline"}
+                          className="justify-start"
+                          onClick={() => setMaintenanceLookupMode("search")}
+                          disabled={!isVisitorLoggedIn || submitting}
+                        >
+                          Search a buried plot
+                        </Button>
+                      </div>
+
+                      {maintenanceLookupMode === "family" ? (
+                        <p className="text-xs text-slate-600">
+                          Use the dropdown above to select a deceased family member already linked to your
+                          account through burial requests or related records.
+                        </p>
+                      ) : (
+                        <div className="space-y-3">
+                          <p className="text-xs text-slate-600">
+                            Optional: if the person is not linked to your account, search for the buried
+                            person or plot here and select the result for your maintenance request.
+                          </p>
+
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <Input
+                              type="text"
+                              value={externalSearchQ}
+                              onChange={(e) => setExternalSearchQ(e.target.value)}
+                              placeholder="Search buried person or plot"
+                              disabled={!isVisitorLoggedIn || submitting}
+                              className="bg-white/70"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={searchBuriedPlots}
+                              disabled={!isVisitorLoggedIn || submitting || externalSearchBusy}
+                              className="gap-2"
+                            >
+                              <Search className="h-4 w-4" />
+                              {externalSearchBusy ? "Searching..." : "Search"}
+                            </Button>
+                          </div>
+
+                          {externalSearchError ? (
+                            <p className="text-xs text-rose-600">{externalSearchError}</p>
+                          ) : null}
+
+                          {externalSearchRows.length ? (
+                            <div className="max-h-60 overflow-auto rounded-xl border bg-white">
+                              <div className="divide-y">
+                                {externalSearchRows.map((row, idx) => {
+                                  const searchName = extractBurialSearchName(row) || "—";
+                                  const searchPlotId = extractBurialSearchPlotId(row);
+                                  const searchPlotLabel = extractBurialSearchPlotLabel(row);
+                                  return (
+                                    <div
+                                      key={`${searchPlotId || "row"}-${idx}`}
+                                      className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between"
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="font-medium text-slate-900">{searchName}</div>
+                                        <div className="text-xs text-slate-500">
+                                          Plot: {searchPlotLabel}
+                                          {searchPlotId != null ? ` (#${String(searchPlotId)})` : ""}
+                                        </div>
+                                        <div className="text-xs text-slate-500">
+                                          Birth: {row?.birth_date || "—"} • Death: {row?.death_date || "—"}
+                                        </div>
+                                      </div>
+
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={() => {
+                                          setSelectedSearchRecord(row);
+                                          setSelectedName("");
+                                          setDeceasedName(searchName);
+                                          setAutoPlotId(null);
+                                          setManualPlotId(
+                                            searchPlotId != null ? String(searchPlotId) : null
+                                          );
+                                          setPrefillReservationId(null);
+                                          setMsg({
+                                            type: "ok",
+                                            text: `Selected ${searchName} for maintenance request.`,
+                                          });
+                                        }}
+                                      >
+                                        Use this
+                                      </Button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+
+                      {selectedSearchRecord ? (
+                        <div className="rounded-xl border bg-emerald-50 p-3 text-xs text-emerald-900">
+                          Selected from search:{" "}
+                          <span className="font-semibold">
+                            {extractBurialSearchName(selectedSearchRecord) || "—"}
+                          </span>
+                          {" • "}
+                          Plot {extractBurialSearchPlotLabel(selectedSearchRecord)}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   {/* linked plot hint */}
                   <div className="flex items-center gap-2 text-xs text-slate-600">
@@ -1385,8 +1604,9 @@ export default function Inquire() {
 
                   {!linkedPlotId ? (
                     <p className="text-[11px] text-slate-500">
-                      If you already reserved a plot, click it on the map to link it here, or make sure
-                      your backend endpoint returns the plot_id for your deceased names.
+                      {requestType === "maintenance"
+                        ? "For maintenance, you may either use your family deceased dropdown or search a buried plot above, then add a note describing the request."
+                        : "If you already reserved a plot, click it on the map to link it here, or make sure your backend endpoint returns the plot_id for your deceased names."}
                     </p>
                   ) : null}
                 </div>
@@ -1395,14 +1615,14 @@ export default function Inquire() {
                 {requestType === "maintenance" ? (
                   <>
                     <div className="space-y-2">
-                      <Label>Description (required)</Label>
+                      <Label>Maintenance note / request details (required)</Label>
                       <Input
                         type="text"
                         value={maintenanceForm.description}
                         onChange={(e) =>
                           setMaintenanceForm((f) => ({ ...f, description: e.target.value }))
                         }
-                        placeholder="e.g., Clean area, fix headstone, remove weeds"
+                        placeholder="e.g., Clean area, fix headstone, remove weeds, repaint marker"
                         disabled={!isVisitorLoggedIn || submitting}
                         className="bg-white/70"
                       />
